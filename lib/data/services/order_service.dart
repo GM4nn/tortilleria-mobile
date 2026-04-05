@@ -6,8 +6,11 @@ class OrderService {
   final _collection = FirebaseFirestore.instance
       .collection(FirestoreCollections.orders);
 
+  String get _todayStart => DateTime.now().toIso8601String().substring(0, 10);
+
   Stream<List<OrderModel>> watchOrders() {
     return _collection
+        .where('created_at', isGreaterThanOrEqualTo: _todayStart)
         .orderBy('created_at', descending: true)
         .snapshots()
         .map(
@@ -19,6 +22,7 @@ class OrderService {
 
   Stream<List<OrderModel>> watchOrdersByStatus(String status) {
     return _collection
+        .where('created_at', isGreaterThanOrEqualTo: _todayStart)
         .where('status', isEqualTo: status)
         .orderBy('created_at', descending: true)
         .snapshots()

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../data/models/order_model.dart';
 import '../../data/services/order_service.dart';
 import '../widgets/order_card.dart';
-import '../widgets/order_filter_chips.dart';
+import '../widgets/order_filters_drawer.dart';
 import '../widgets/payment_dialog.dart';
 
 class OrdersScreen extends StatefulWidget {
@@ -14,83 +14,124 @@ class OrdersScreen extends StatefulWidget {
 
 class _OrdersScreenState extends State<OrdersScreen> {
   final _orderService = OrderService();
+
   String _statusFilter = 'todos';
   String _paymentFilter = 'todos';
-
-  static const _statusFilters = {
-    'todos': ('Todos', Icons.list, Colors.blue),
-    'pendiente': ('Pendientes', Icons.schedule, Colors.orange),
-    'completado': ('Completados', Icons.check_circle, Colors.green),
-    'cancelado': ('Cancelados', Icons.cancel, Colors.red),
-  };
-
-  static const _paymentFilters = {
-    'todos': ('Todos', Icons.list, Colors.blue),
-    'sin_pagar': ('Sin Pagar', Icons.money_off, Colors.red),
-    'parcial': ('Parcial', Icons.payments_outlined, Colors.orange),
-    'pagado': ('Pagado', Icons.paid, Colors.green),
-  };
+  String _orderIdSearch = '';
+  String _customerSearch = '';
+  TimeOfDay? _timeFrom;
+  TimeOfDay? _timeTo;
 
   Stream<List<OrderModel>> get _ordersStream => _statusFilter == 'todos'
       ? _orderService.watchOrders()
       : _orderService.watchOrdersByStatus(_statusFilter);
 
-  List<OrderModel> _applyPaymentFilter(List<OrderModel> orders) {
-    if (_paymentFilter == 'todos') return orders;
+  int get _activeFiltersCount {
+    int count = 0;
+    if (_statusFilter != 'todos') count++;
+    if (_paymentFilter != 'todos') count++;
+    if (_orderIdSearch.isNotEmpty) count++;
+    if (_customerSearch.isNotEmpty) count++;
+    if (_timeFrom != null || _timeTo != null) count++;
+    return count;
+  }
 
-    return orders.where((order) {
-      return switch (_paymentFilter) {
-        'sin_pagar' => order.amountPaid <= 0,
-        'parcial' => order.amountPaid > 0 && !order.isFullyPaid,
-        'pagado' => order.isFullyPaid,
-        _ => true,
-      };
-    }).toList();
+  List<OrderModel> _applyLocalFilters(List<OrderModel> orders) {
+    var filtered = orders;
+
+    if (_paymentFilter != 'todos') {
+      filtered = filtered.where((order) {
+        return switch (_paymentFilter) {
+          'sin_pagar' => order.amountPaid <= 0,
+          'parcial' => order.amountPaid > 0 && !order.isFullyPaid,
+          'pagado' => order.isFullyPaid,
+          _ => true,
+        };
+      }).toList();
+    }
+
+    if (_orderIdSearch.isNotEmpty) {
+      filtered = filtered
+          .where((o) => o.orderId.toString().contains(_orderIdSearch))
+          .toList();
+    }
+
+    if (_customerSearch.isNotEmpty) {
+      final search = _customerSearch.toLowerCase();
+      filtered = filtered
+          .where((o) => o.customerName.toLowerCase().contains(search))
+          .toList();
+    }
+
+    if (_timeFrom != null || _timeTo != null) {
+      filtered = filtered.where((order) {
+        try {
+          final date = DateTime.parse(order.createdAt);
+          final orderMinutes = date.hour * 60 + date.minute;
+
+          if (_timeFrom != null) {
+            final fromMinutes = _timeFrom!.hour * 60 + _timeFrom!.minute;
+            if (orderMinutes < fromMinutes) return false;
+          }
+
+          if (_timeTo != null) {
+            final toMinutes = _timeTo!.hour * 60 + _timeTo!.minute;
+            if (orderMinutes > toMinutes) return false;
+          }
+
+          return true;
+        } catch (_) {
+          return true;
+        }
+      }).toList();
+    }
+
+    return filtered;
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _statusFilter = 'todos';
+      _paymentFilter = 'todos';
+      _orderIdSearch = '';
+      _customerSearch = '';
+      _timeFrom = null;
+      _timeTo = null;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Pedidos')),
-      body: Column(
-        children: [
-          Container(
-            margin: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withAlpha(15),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2),
-                ),
-              ],
+      appBar: AppBar(
+        title: const Text('Pedidos'),
+        leading: Builder(
+          builder: (ctx) => IconButton(
+            icon: Badge(
+              isLabelVisible: _activeFiltersCount > 0,
+              label: Text('$_activeFiltersCount'),
+              child: const Icon(Icons.filter_list),
             ),
-            child: Column(
-              children: [
-                OrderFilterChips(
-                  label: 'Entrega',
-                  selectedFilter: _statusFilter,
-                  filters: _statusFilters,
-                  onFilterChanged: (filter) =>
-                      setState(() => _statusFilter = filter),
-                ),
-                const SizedBox(height: 10),
-                OrderFilterChips(
-                  label: 'Pago',
-                  selectedFilter: _paymentFilter,
-                  filters: _paymentFilters,
-                  onFilterChanged: (filter) =>
-                      setState(() => _paymentFilter = filter),
-                ),
-              ],
-            ),
+            onPressed: () => Scaffold.of(ctx).openDrawer(),
           ),
-          Expanded(child: _buildOrdersList()),
-        ],
+        ),
       ),
+      drawer: OrderFiltersDrawer(
+        statusFilter: _statusFilter,
+        paymentFilter: _paymentFilter,
+        orderIdSearch: _orderIdSearch,
+        customerSearch: _customerSearch,
+        timeFrom: _timeFrom,
+        timeTo: _timeTo,
+        onStatusChanged: (v) => setState(() => _statusFilter = v),
+        onPaymentChanged: (v) => setState(() => _paymentFilter = v),
+        onOrderIdChanged: (v) => setState(() => _orderIdSearch = v),
+        onCustomerChanged: (v) => setState(() => _customerSearch = v),
+        onTimeFromChanged: (v) => setState(() => _timeFrom = v),
+        onTimeToChanged: (v) => setState(() => _timeTo = v),
+        onClearFilters: _clearFilters,
+      ),
+      body: _buildOrdersList(),
     );
   }
 
@@ -109,7 +150,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final orders = _applyPaymentFilter(snapshot.data!);
+        final orders = _applyLocalFilters(snapshot.data!);
 
         if (orders.isEmpty) {
           return _buildMessage(
@@ -119,7 +160,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
         }
 
         return ListView.builder(
-          padding: const EdgeInsets.only(top: 4, bottom: 16),
+          padding: const EdgeInsets.only(top: 8, bottom: 16),
           itemCount: orders.length,
           itemBuilder: (_, index) => OrderCard(
             order: orders[index],
