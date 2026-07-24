@@ -3,8 +3,9 @@ import '../../core/constants/firestore_collections.dart';
 import '../models/order_model.dart';
 
 class OrderService {
-  final _collection = FirebaseFirestore.instance
-      .collection(FirestoreCollections.orders);
+  final _collection = FirebaseFirestore.instance.collection(
+    FirestoreCollections.orders,
+  );
 
   String get _todayStart => DateTime.now().toIso8601String().substring(0, 10);
 
@@ -33,15 +34,21 @@ class OrderService {
         );
   }
 
+  Future<void> takeOrder(int orderId, String username) {
+    return _collection.doc(orderId.toString()).update({
+      'default_dealer': username,
+    });
+  }
+
   Future<void> completeOrder(int orderId) {
-    return _collection
-        .doc(orderId.toString())
-        .update({'status': 'completado'});
+    return _collection.doc(orderId.toString()).update({
+      'status': FirestoreCollections.completedStatus,
+    });
   }
 
   Future<void> registerPayment(int orderId, double newAmountPaid) {
-    return _collection
-        .doc(orderId.toString())
-        .update({'amount_paid': newAmountPaid});
+    return _collection.doc(orderId.toString()).update({
+      'amount_paid': newAmountPaid,
+    });
   }
 }

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../../data/models/order_model.dart';
 import '../../data/services/order_service.dart';
+import '../../data/services/session.dart';
 import '../widgets/order_card.dart';
 import '../widgets/order_filters_drawer.dart';
 import '../widgets/payment_dialog.dart';
+import 'login_screen.dart';
 
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
@@ -115,6 +117,20 @@ class _OrdersScreenState extends State<OrdersScreen> {
             onPressed: () => Scaffold.of(ctx).openDrawer(),
           ),
         ),
+        actions: [
+          if (Session.instance.displayName != null)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Text(Session.instance.displayName!),
+              ),
+            ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Cerrar sesión',
+            onPressed: _logout,
+          ),
+        ],
       ),
       drawer: OrderFiltersDrawer(
         statusFilter: _statusFilter,
@@ -164,11 +180,30 @@ class _OrdersScreenState extends State<OrdersScreen> {
           itemCount: orders.length,
           itemBuilder: (_, index) => OrderCard(
             order: orders[index],
+            currentDealer: Session.instance.username,
             onComplete: () => _completeOrder(orders[index]),
             onPayment: () => _registerPayment(orders[index]),
+            onTake: () => _takeOrder(orders[index]),
           ),
         );
       },
+    );
+  }
+
+  void _takeOrder(OrderModel order) async {
+    final username = Session.instance.username;
+    if (username == null) return;
+
+    await _orderService.takeOrder(order.orderId, username);
+  }
+
+  void _logout() async {
+    await Session.instance.logout();
+
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
     );
   }
 

@@ -8,6 +8,7 @@ class OrderModel {
   final double amountPaid;
   final String status;
   final String createdAt;
+  final String? defaultDealer;
 
   const OrderModel({
     required this.orderId,
@@ -17,6 +18,7 @@ class OrderModel {
     required this.amountPaid,
     required this.status,
     required this.createdAt,
+    this.defaultDealer,
   });
 
   double get remainingBalance => total - amountPaid;
@@ -29,6 +31,9 @@ class OrderModel {
   }
 
   bool get isFullyDone => status == 'completado' && isFullyPaid;
+
+  bool ownedBy(String? username) =>
+      username != null && defaultDealer == username;
 
   factory OrderModel.fromMap(Map<String, dynamic> map) {
     final rawItems = map['items'] as List<dynamic>? ?? [];
@@ -43,6 +48,9 @@ class OrderModel {
       amountPaid: (map['amount_paid'] as num?)?.toDouble() ?? 0.0,
       status: map['status'] ?? 'pendiente',
       createdAt: map['created_at'] ?? '',
+      defaultDealer: (map['default_dealer'] as String?)?.isNotEmpty == true
+          ? map['default_dealer']
+          : null,
     );
   }
 }

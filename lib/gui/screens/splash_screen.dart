@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../data/services/session.dart';
+import 'login_screen.dart';
 import 'orders_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -28,15 +30,22 @@ class _SplashScreenState extends State<SplashScreen>
     );
 
     _controller.forward();
+    _goNext();
+  }
 
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const OrdersScreen()),
-        );
-      }
-    });
+  Future<void> _goNext() async {
+    await Session.instance.load();
+    await Future.delayed(const Duration(seconds: 3));
+
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => Session.instance.isLoggedIn
+            ? const OrdersScreen()
+            : const LoginScreen(),
+      ),
+    );
   }
 
   @override

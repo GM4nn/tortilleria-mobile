@@ -5,15 +5,21 @@ import 'order_status_badge.dart';
 
 class OrderCard extends StatelessWidget {
   final OrderModel order;
+  final String? currentDealer;
   final VoidCallback? onComplete;
   final VoidCallback? onPayment;
+  final VoidCallback? onTake;
 
   const OrderCard({
     super.key,
     required this.order,
+    this.currentDealer,
     this.onComplete,
     this.onPayment,
+    this.onTake,
   });
+
+  bool get _isMine => order.ownedBy(currentDealer);
 
   static final _currencyFormat = NumberFormat.currency(
     locale: 'es_MX',
@@ -90,6 +96,41 @@ class OrderCard extends StatelessWidget {
             OrderStatusBadge(label: 'Pago', status: order.paymentStatus),
           ],
         ),
+        const SizedBox(height: 8),
+        _buildDealer(theme),
+      ],
+    );
+  }
+
+  Widget _buildDealer(ThemeData theme) {
+    final dealer = order.defaultDealer;
+    final assigned = dealer != null;
+
+    return Row(
+      children: [
+        Icon(
+          Icons.delivery_dining,
+          size: 16,
+          color: _isMine ? Colors.green[700] : Colors.grey,
+        ),
+        const SizedBox(width: 4),
+        Text(
+          assigned ? dealer : 'Sin asignar',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: _isMine ? Colors.green[700] : Colors.grey[700],
+            fontWeight: _isMine ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+        if (_isMine) ...[
+          const SizedBox(width: 4),
+          Text(
+            '(tú)',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: Colors.green[700],
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -156,6 +197,24 @@ class OrderCard extends StatelessWidget {
   }
 
   Widget _buildActionButtons(ThemeData theme) {
+    if (!_isMine) {
+      return SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          onPressed: onTake,
+          icon: const Icon(Icons.pan_tool_alt_outlined, size: 18),
+          label: const Text('Tomar'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.deepOrange,
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ),
+      );
+    }
+
     final showPayment = onPayment != null && !order.isFullyPaid;
     final showComplete = onComplete != null && order.status == 'pendiente';
 
