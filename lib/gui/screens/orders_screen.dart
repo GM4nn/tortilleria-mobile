@@ -194,7 +194,27 @@ class _OrdersScreenState extends State<OrdersScreen> {
     final username = Session.instance.username;
     if (username == null) return;
 
-    await _orderService.takeOrder(order.orderId, username);
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Tomar Pedido'),
+        content: Text('¿Tomar el pedido #${order.orderId} y asignártelo?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('No'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Sí, tomar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await _orderService.takeOrder(order.orderId, username);
+    }
   }
 
   void _logout() async {
