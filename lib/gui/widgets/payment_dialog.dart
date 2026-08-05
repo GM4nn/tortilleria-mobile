@@ -110,14 +110,18 @@ class _PaymentDialogState extends State<PaymentDialog> {
   }
 
   void _confirm() {
-    final amount = double.tryParse(_controller.text);
+    final parsed = double.tryParse(_controller.text);
 
-    if (amount == null || amount <= 0) {
+    if (parsed == null || parsed <= 0) {
       setState(() => _error = 'Ingrese un monto válido');
       return;
     }
 
-    if (amount > _remaining) {
+    // El dinero se maneja a 2 decimales: evita que un tercer decimal (ej. 70.501)
+    // se cuele y termine excediendo el total del pedido.
+    final amount = (parsed * 100).round() / 100;
+
+    if (amount > _remaining + 0.001) {
       setState(() => _error = 'No puede exceder ${_currency.format(_remaining)}');
       return;
     }
