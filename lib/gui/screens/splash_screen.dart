@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../data/services/session.dart';
 import 'login_screen.dart';
-import 'orders_screen.dart';
+import 'routes_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -42,7 +42,7 @@ class _SplashScreenState extends State<SplashScreen>
       context,
       MaterialPageRoute(
         builder: (_) => Session.instance.isLoggedIn
-            ? const OrdersScreen()
+            ? const RoutesScreen()
             : const LoginScreen(),
       ),
     );

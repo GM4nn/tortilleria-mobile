@@ -5,10 +5,14 @@ import '../../data/services/session.dart';
 import '../widgets/order_card.dart';
 import '../widgets/order_filters_drawer.dart';
 import '../widgets/payment_dialog.dart';
-import 'login_screen.dart';
+import 'route_map_screen.dart';
 
 class OrdersScreen extends StatefulWidget {
-  const OrdersScreen({super.key});
+  /// Ruta seleccionada ("Sin ruta" para los pedidos sin ruta asignada).
+  final String routeName;
+  final String? routeColor;
+
+  const OrdersScreen({super.key, required this.routeName, this.routeColor});
 
   @override
   State<OrdersScreen> createState() => _OrdersScreenState();
@@ -16,6 +20,8 @@ class OrdersScreen extends StatefulWidget {
 
 class _OrdersScreenState extends State<OrdersScreen> {
   final _orderService = OrderService();
+
+  List<OrderModel> _latestOrders = [];
 
   String _statusFilter = 'todos';
   String _paymentFilter = 'todos';
@@ -40,6 +46,19 @@ class _OrdersScreenState extends State<OrdersScreen> {
 
   List<OrderModel> _applyLocalFilters(List<OrderModel> orders) {
     var filtered = orders;
+
+    // Solo los pedidos asignados a este repartidor
+    final me = Session.instance.username;
+    filtered = filtered.where((o) => o.defaultDealer == me).toList();
+
+    // Filtra a la ruta seleccionada
+    final noRoute = widget.routeName == 'Sin ruta';
+    filtered = filtered.where((o) {
+      final rn = (o.routeName == null || o.routeName!.isEmpty)
+          ? 'Sin ruta'
+          : o.routeName!;
+      return noRoute ? rn == 'Sin ruta' : rn == widget.routeName;
+    }).toList();
 
     if (_paymentFilter != 'todos') {
       filtered = filtered.where((order) {
@@ -106,29 +125,23 @@ class _OrdersScreenState extends State<OrdersScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Pedidos'),
-        leading: Builder(
-          builder: (ctx) => IconButton(
-            icon: Badge(
-              isLabelVisible: _activeFiltersCount > 0,
-              label: Text('$_activeFiltersCount'),
-              child: const Icon(Icons.filter_list),
-            ),
-            onPressed: () => Scaffold.of(ctx).openDrawer(),
-          ),
-        ),
+        title: Text(widget.routeName),
         actions: [
-          if (Session.instance.displayName != null)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: Text(Session.instance.displayName!),
+          Builder(
+            builder: (ctx) => IconButton(
+              icon: Badge(
+                isLabelVisible: _activeFiltersCount > 0,
+                label: Text('$_activeFiltersCount'),
+                child: const Icon(Icons.filter_list),
               ),
+              tooltip: 'Filtros',
+              onPressed: () => Scaffold.of(ctx).openDrawer(),
             ),
+          ),
           IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Cerrar sesión',
-            onPressed: _logout,
+            icon: const Icon(Icons.map_outlined),
+            tooltip: 'Ver ruta en el mapa',
+            onPressed: _openMap,
           ),
         ],
       ),
@@ -167,6 +180,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
         }
 
         final orders = _applyLocalFilters(snapshot.data!);
+        _latestOrders = orders; // el mapa usa la misma lista filtrada (mi repartidor + esta ruta)
 
         if (orders.isEmpty) {
           return _buildMessage(
@@ -217,13 +231,17 @@ class _OrdersScreenState extends State<OrdersScreen> {
     }
   }
 
-  void _logout() async {
-    await Session.instance.logout();
-
-    if (!mounted) return;
-    Navigator.pushReplacement(
+  void _openMap() {
+    final withLocation = _latestOrders.where((o) => o.hasLocation).toList();
+    if (withLocation.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No hay clientes con ubicación para hoy')),
+      );
+      return;
+    }
+    Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      MaterialPageRoute(builder: (_) => RouteMapScreen(orders: withLocation)),
     );
   }
 

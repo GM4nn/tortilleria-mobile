@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Ruta del día</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+:root{--bg:#0a0a10;--panel:#111118;--card:#16161f;--border:#1e1e2e;--text:#e8e8f0;--muted:#5a5a72;--accent:#2ecc71;}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;overflow:hidden;}
+#map{position:absolute;inset:0;}
+.leaflet-container{background:#0a0a10;}
+.leaflet-popup-content-wrapper{background:#1a1a28!important;border:1px solid rgba(255,255,255,.1)!important;border-radius:12px!important;color:var(--text)!important;}
+.leaflet-popup-tip{background:#1a1a28!important;}
+.leaflet-popup-close-button{color:var(--muted)!important;}
+.pp-time{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
+.pp-name{font-size:16px;font-weight:600;margin:2px 0 4px;}
+.pp-desc{font-size:12px;color:#8888a8;line-height:1.4;}
+.pp-btn{display:inline-block;margin-top:8px;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;text-decoration:none;background:rgba(76,201,240,.15);color:#4cc9f0;border:1px solid rgba(76,201,240,.4);}
+/* filtros arriba */
+#filters{position:absolute;top:10px;left:10px;right:10px;z-index:800;display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;}
+#filters::-webkit-scrollbar{display:none;}
+.chip{flex-shrink:0;padding:6px 12px;border-radius:20px;border:1px solid var(--border);background:rgba(17,17,24,.92);color:var(--muted);font-size:12px;font-weight:500;white-space:nowrap;}
+.chip.active{color:#000;font-weight:700;}
+/* panel inferior */
+#panel{position:absolute;left:0;right:0;bottom:0;z-index:800;background:var(--panel);border-top:1px solid var(--border);border-radius:16px 16px 0 0;max-height:38vh;overflow-y:auto;transform:translateY(calc(100% - 42px));transition:transform .3s ease;}
+#panel.open{transform:translateY(0);}
+#panel-handle{padding:12px;text-align:center;font-size:12px;color:var(--muted);cursor:pointer;font-weight:600;}
+.grp-title{font-size:13px;font-weight:700;letter-spacing:.5px;padding:6px 12px 2px;display:flex;align-items:center;gap:8px;}
+.dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+.stop{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;}
+.stop:active{background:rgba(255,255,255,.05);}
+.stop.pa{background:rgba(76,201,240,.12);}
+.stop.pb{background:rgba(46,204,113,.12);}
+.num{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#000;flex-shrink:0;}
+.st-info{flex:1;min-width:0;}
+.st-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.st-sub{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+/* barra de ruta A->B */
+#routebar{position:absolute;left:10px;right:10px;bottom:calc(38vh + 8px);z-index:850;display:none;gap:6px;background:rgba(17,17,24,.95);border:1px solid var(--border);border-radius:12px;padding:8px;}
+#routebar.show{display:flex;}
+.rb-btn{flex:1;padding:8px;border-radius:9px;border:1px solid rgba(46,204,113,.4);background:rgba(46,204,113,.12);color:#2ecc71;font-size:12px;font-weight:600;}
+.rb-btn.clear{border-color:rgba(231,76,60,.4);background:rgba(231,76,60,.1);color:#e74c3c;}
+#toast{position:absolute;top:56px;left:50%;transform:translateX(-50%);z-index:900;background:rgba(17,17,24,.95);border:1px solid rgba(46,204,113,.4);border-radius:20px;padding:8px 16px;font-size:12px;font-weight:600;color:#2ecc71;display:none;}
+#empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);font-size:14px;padding:24px;z-index:700;}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="filters"></div>
+<div id="routebar">
+  <button class="rb-btn" id="rb-route" onclick="drawRoute()">🗺 Ver ruta A→B</button>
+  <button class="rb-btn clear" onclick="clearRoute()">✕</button>
+</div>
+<div id="panel">
+  <div id="panel-handle" onclick="togglePanel()">▲ Lista de clientes</div>
+  <div id="panel-list"></div>
+</div>
+<div id="toast"></div>
+<div id="empty">Sin clientes con ubicación para hoy.</div>
+
+<script>
+var map=null, stops=[], markers=[], routeLayer=null, filter='all';
+var A=null, B=null;
+
+function toChannel(url){ try{ MapChannel.postMessage(url); }catch(e){ window.open(url,'_blank'); } }
+
+function dist(a,b){ var dx=a.lat-b.lat, dy=a.lng-b.lng; return dx*dx+dy*dy; }
+// Vecino más cercano: arranca del punto más al norte y encadena
+function nearestOrder(list){
+  if(list.length<=1) return list.slice();
+  var pts=list.slice(), out=[];
+  var start=0; for(var i=1;i<pts.length;i++){ if(pts[i].lat>pts[start].lat) start=i; }
+  var cur=pts.splice(start,1)[0]; out.push(cur);
+  while(pts.length){
+    var bi=0, bd=Infinity;
+    for(var j=0;j<pts.length;j++){ var d=dist(cur,pts[j]); if(d<bd){bd=d;bi=j;} }
+    cur=pts.splice(bi,1)[0]; out.push(cur);
+  }
+  return out;
+}
+
+// Llamado desde Flutter con el JSON de pedidos
+function setStops(json){
+  try{ stops=(typeof json==='string'?JSON.parse(json):json)||[]; }catch(e){ stops=[]; }
+  stops=stops.filter(function(s){ return s.lat!=null && s.lng!=null; });
+  document.getElementById('empty').style.display = stops.length? 'none':'flex';
+  if(!stops.length) return;
+  if(!map) initMap();
+  render();
+}
+
+function initMap(){
+  map=L.map('map',{zoomControl:true,attributionControl:false}).setView([19.43,-99.13],12);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(map);
+}
+
+function routesList(){
+  var seen={}, out=[];
+  stops.forEach(function(s){ var k=s.route_id==null?'none':s.route_id; if(!seen[k]){seen[k]=1; out.push({id:k,name:s.route_name||'Sin ruta',color:s.route_color||'#4cc9f0'});} });
+  return out;
+}
+
+function render(){
+  markers.forEach(function(m){ map.removeLayer(m.marker); }); markers=[];
+  var routes=routesList();
+
+  // filtros
+  var fb=document.getElementById('filters');
+  fb.innerHTML='<button class="chip '+(filter==='all'?'active':'')+'" style="'+(filter==='all'?'background:#fff;':'')+'" onclick="setFilter(\'all\')">Todos</button>'+
+    routes.map(function(r){ var a=String(r.id)===String(filter); return '<button class="chip '+(a?'active':'')+'" style="'+(a?'background:'+r.color+';':'')+'" onclick="setFilter(\''+r.id+'\')">'+r.name+'</button>'; }).join('');
+
+  var list=document.getElementById('panel-list'); list.innerHTML='';
+  var allLatLng=[];
+
+  routes.forEach(function(r){
+    if(filter!=='all' && String(r.id)!==String(filter)) return;
+    var group=stops.filter(function(s){ return (s.route_id==null?'none':String(s.route_id))===String(r.id); });
+    group=nearestOrder(group);
+    if(!group.length) return;
+
+    var sec=document.createElement('div');
+    sec.innerHTML='<div class="grp-title" style="color:'+r.color+'"><span class="dot" style="background:'+r.color+'"></span>'+r.name+' · '+group.length+'</div>';
+    list.appendChild(sec);
+
+    group.forEach(function(s,idx){
+      allLatLng.push([s.lat,s.lng]);
+      var icon=L.divIcon({className:'',html:'<div style="width:24px;height:24px;background:'+r.color+';border:2px solid rgba(255,255,255,.9);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#000;box-shadow:0 0 8px '+r.color+'">'+(idx+1)+'</div>',iconSize:[24,24],iconAnchor:[12,12],popupAnchor:[0,-12]});
+      var gmaps='https://www.google.com/maps/dir/?api=1&destination='+s.lat+','+s.lng+'&travelmode=driving';
+      var popup='<div class="pp-time">'+(s.time||'')+'</div><div class="pp-name" style="color:'+r.color+'">'+(idx+1)+'. '+s.name+'</div><div class="pp-desc">'+(s.items||'')+(s.direction?'<br>'+s.direction:'')+'</div><a class="pp-btn" href="javascript:void(0)" onclick="toChannel(\''+gmaps+'\')">📍 Cómo llegar</a>';
+      var mk=L.marker([s.lat,s.lng],{icon:icon}).bindPopup(popup,{maxWidth:240}).addTo(map);
+      markers.push({marker:mk,stop:s});
+
+      var row=document.createElement('div');
+      row.className='stop'; row.id='stop-'+s.order_id;
+      row.innerHTML='<div class="num" style="background:'+r.color+'">'+(idx+1)+'</div><div class="st-info"><div class="st-name">'+s.name+'</div><div class="st-sub">'+(s.time?s.time+' · ':'')+(s.items||'')+'</div></div>';
+      row.onclick=function(){ selectStop(s,row); };
+      list.appendChild(row);
+    });
+  });
+
+  if(allLatLng.length) map.fitBounds(L.latLngBounds(allLatLng),{padding:[50,50]});
+}
+
+function setFilter(f){ filter=f; clearRoute(); render(); }
+
+function focusStop(s){
+  map.flyTo([s.lat,s.lng],16,{animate:true,duration:.7});
+  var found=markers.find(function(m){ return m.stop.order_id===s.order_id; });
+  if(found) setTimeout(function(){ found.marker.openPopup(); },750);
+}
+
+// Tocar un cliente = seleccionar A/B para trazar ruta
+function selectStop(s,row){
+  if(!A){ A=s; row.classList.add('pa'); focusStop(s); }
+  else if(!B && s.order_id!==A.order_id){ B=s; row.classList.add('pb'); focusStop(s); }
+  else { clearRoute(); A=s; document.getElementById('stop-'+s.order_id).classList.add('pa'); focusStop(s); }
+  document.getElementById('routebar').classList.toggle('show', !!A);
+  document.getElementById('rb-route').disabled=!(A&&B);
+}
+
+async function drawRoute(){
+  if(!A||!B) return;
+  if(routeLayer){ map.removeLayer(routeLayer); routeLayer=null; }
+  try{
+    var url='https://router.project-osrm.org/route/v1/driving/'+A.lng+','+A.lat+';'+B.lng+','+B.lat+'?overview=full&geometries=geojson';
+    var res=await fetch(url); var data=await res.json();
+    if(data.code!=='Ok') throw 0;
+    var route=data.routes[0];
+    var coords=route.geometry.coordinates.map(function(c){ return [c[1],c[0]]; });
+    routeLayer=L.polyline(coords,{color:'#2ecc71',weight:4,opacity:.85,dashArray:'8,6'}).addTo(map);
+    map.fitBounds(routeLayer.getBounds(),{padding:[40,40]});
+    var km=(route.distance/1000).toFixed(1), min=Math.round(route.duration/60);
+    showToast('🚗 '+min+' min · '+km+' km');
+  }catch(e){ showToast('No se pudo trazar la ruta'); }
+}
+
+function clearRoute(){
+  if(A) { var ea=document.getElementById('stop-'+A.order_id); if(ea) ea.classList.remove('pa'); }
+  if(B) { var eb=document.getElementById('stop-'+B.order_id); if(eb) eb.classList.remove('pb'); }
+  A=null; B=null;
+  if(routeLayer){ map.removeLayer(routeLayer); routeLayer=null; }
+  document.getElementById('routebar').classList.remove('show');
+}
+
+function showToast(msg){ var t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(function(){ t.style.display='none'; },4000); }
+function togglePanel(){ var p=document.getElementById('panel'); p.classList.toggle('open'); document.querySelector('#panel-handle').textContent=(p.classList.contains('open')?'▼':'▲')+' Lista de clientes'; }
+</script>
+</body>
+</html>

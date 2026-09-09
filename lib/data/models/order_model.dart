@@ -9,6 +9,14 @@ class OrderModel {
   final String status;
   final String createdAt;
   final String? defaultDealer;
+  // Ubicación + ruta (para el mapa)
+  final double? customerLat;
+  final double? customerLng;
+  final String? customerDirection;
+  final int? routeId;
+  final String? routeName;
+  final String? routeColor;
+  final String? deliveryTime;
 
   const OrderModel({
     required this.orderId,
@@ -19,7 +27,16 @@ class OrderModel {
     required this.status,
     required this.createdAt,
     this.defaultDealer,
+    this.customerLat,
+    this.customerLng,
+    this.customerDirection,
+    this.routeId,
+    this.routeName,
+    this.routeColor,
+    this.deliveryTime,
   });
+
+  bool get hasLocation => customerLat != null && customerLng != null;
 
   double get remainingBalance => total - amountPaid;
   bool get isFullyPaid => amountPaid >= total;
@@ -51,6 +68,30 @@ class OrderModel {
       defaultDealer: (map['default_dealer'] as String?)?.isNotEmpty == true
           ? map['default_dealer']
           : null,
+      customerLat: (map['customer_lat'] as num?)?.toDouble(),
+      customerLng: (map['customer_lng'] as num?)?.toDouble(),
+      customerDirection: map['customer_direction'] as String?,
+      routeId: (map['route_id'] as num?)?.toInt(),
+      routeName: map['route_name'] as String?,
+      routeColor: map['route_color'] as String?,
+      deliveryTime: map['delivery_time'] as String?,
     );
   }
+
+  /// Representación ligera para inyectar al mapa (WebView).
+  Map<String, dynamic> toMapStop() => {
+        'order_id': orderId,
+        'name': customerName,
+        'lat': customerLat,
+        'lng': customerLng,
+        'direction': customerDirection ?? '',
+        'route_id': routeId,
+        'route_name': routeName ?? 'Sin ruta',
+        'route_color': routeColor ?? '#4cc9f0',
+        'time': deliveryTime ?? '',
+        'items': items
+            .map((i) => '${i.name} ×${i.quantity}')
+            .join(', '),
+        'status': status,
+      };
 }

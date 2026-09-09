@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/models/dealer_model.dart';
 import '../../data/services/session.dart';
 import '../../data/services/dealer_service.dart';
-import 'orders_screen.dart';
+import 'routes_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -73,7 +73,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => const OrdersScreen()),
+      MaterialPageRoute(builder: (_) => const RoutesScreen()),
     );
   }
 
