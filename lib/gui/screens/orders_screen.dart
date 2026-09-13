@@ -1,14 +1,24 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+
+import '../../core/utils/route_order.dart';
 import '../../data/models/order_model.dart';
 import '../../data/services/order_service.dart';
 import '../../data/services/session.dart';
+import '../widgets/delivery_dialog.dart';
 import '../widgets/order_card.dart';
-import '../widgets/order_filters_drawer.dart';
 import '../widgets/payment_dialog.dart';
-import 'route_map_screen.dart';
 
+/// Vista principal de una ruta: el MAPA con las paradas en orden (más cercano →
+/// más lejano desde la tortillería). Traza la ruta desde el GPS del repartidor,
+/// abre la ruta completa en Google Maps, y al tocar un pin muestra la card del
+/// pedido (con sus acciones de completar/pagar).
 class OrdersScreen extends StatefulWidget {
-  /// Ruta seleccionada ("Sin ruta" para los pedidos sin ruta asignada).
   final String routeName;
   final String? routeColor;
 
@@ -21,104 +31,155 @@ class OrdersScreen extends StatefulWidget {
 class _OrdersScreenState extends State<OrdersScreen> {
   final _orderService = OrderService();
 
-  List<OrderModel> _latestOrders = [];
+  WebViewController? _controller;
+  StreamSubscription<List<OrderModel>>? _sub;
+  StreamSubscription<Position>? _posSub;
+  List<OrderModel> _orders = [];
+  Position? _gps;
+  bool _mapReady = false;
 
-  String _statusFilter = 'todos';
-  String _paymentFilter = 'todos';
-  String _orderIdSearch = '';
-  String _customerSearch = '';
-  TimeOfDay? _timeFrom;
-  TimeOfDay? _timeTo;
-
-  Stream<List<OrderModel>> get _ordersStream => _statusFilter == 'todos'
-      ? _orderService.watchOrders()
-      : _orderService.watchOrdersByStatus(_statusFilter);
-
-  int get _activeFiltersCount {
-    int count = 0;
-    if (_statusFilter != 'todos') count++;
-    if (_paymentFilter != 'todos') count++;
-    if (_orderIdSearch.isNotEmpty) count++;
-    if (_customerSearch.isNotEmpty) count++;
-    if (_timeFrom != null || _timeTo != null) count++;
-    return count;
+  @override
+  void initState() {
+    super.initState();
+    _initMap();
+    _initGps();
+    _sub = _orderService.watchOrders().listen((data) {
+      _orders = _applyLocalFilters(data);
+      _pushStops();
+    });
   }
 
+  @override
+  void dispose() {
+    _sub?.cancel();
+    _posSub?.cancel();
+    super.dispose();
+  }
+
+  // Solo los pedidos de este repartidor y de esta ruta, ordenados por cercanía.
   List<OrderModel> _applyLocalFilters(List<OrderModel> orders) {
-    var filtered = orders;
-
-    // Solo los pedidos asignados a este repartidor
     final me = Session.instance.username;
-    filtered = filtered.where((o) => o.defaultDealer == me).toList();
-
-    // Filtra a la ruta seleccionada
     final noRoute = widget.routeName == 'Sin ruta';
-    filtered = filtered.where((o) {
+    final filtered = orders.where((o) {
+      if (o.defaultDealer != me) return false;
       final rn = (o.routeName == null || o.routeName!.isEmpty)
           ? 'Sin ruta'
           : o.routeName!;
       return noRoute ? rn == 'Sin ruta' : rn == widget.routeName;
     }).toList();
-
-    if (_paymentFilter != 'todos') {
-      filtered = filtered.where((order) {
-        return switch (_paymentFilter) {
-          'sin_pagar' => order.amountPaid <= 0,
-          'parcial' => order.amountPaid > 0 && !order.isFullyPaid,
-          'pagado' => order.isFullyPaid,
-          _ => true,
-        };
-      }).toList();
-    }
-
-    if (_orderIdSearch.isNotEmpty) {
-      filtered = filtered
-          .where((o) => o.orderId.toString().contains(_orderIdSearch))
-          .toList();
-    }
-
-    if (_customerSearch.isNotEmpty) {
-      final search = _customerSearch.toLowerCase();
-      filtered = filtered
-          .where((o) => o.customerName.toLowerCase().contains(search))
-          .toList();
-    }
-
-    if (_timeFrom != null || _timeTo != null) {
-      filtered = filtered.where((order) {
-        try {
-          final date = DateTime.parse(order.createdAt);
-          final orderMinutes = date.hour * 60 + date.minute;
-
-          if (_timeFrom != null) {
-            final fromMinutes = _timeFrom!.hour * 60 + _timeFrom!.minute;
-            if (orderMinutes < fromMinutes) return false;
-          }
-
-          if (_timeTo != null) {
-            final toMinutes = _timeTo!.hour * 60 + _timeTo!.minute;
-            if (orderMinutes > toMinutes) return false;
-          }
-
-          return true;
-        } catch (_) {
-          return true;
-        }
-      }).toList();
-    }
-
-    return filtered;
+    return orderByNearest(filtered);
   }
 
-  void _clearFilters() {
-    setState(() {
-      _statusFilter = 'todos';
-      _paymentFilter = 'todos';
-      _orderIdSearch = '';
-      _customerSearch = '';
-      _timeFrom = null;
-      _timeTo = null;
-    });
+  void _initMap() {
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(const Color(0xFFE5E7EB))
+      ..addJavaScriptChannel(
+        'MapChannel',
+        onMessageReceived: (msg) {
+          final uri = Uri.tryParse(msg.message);
+          if (uri != null) {
+            launchUrl(uri, mode: LaunchMode.externalApplication);
+          }
+        },
+      )
+      ..addJavaScriptChannel(
+        'OrderChannel',
+        onMessageReceived: (msg) => _onPinTapped(msg.message),
+      )
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (_) {
+            _mapReady = true;
+            _pushStops();
+            _pushStart();
+          },
+        ),
+      )
+      ..loadFlutterAsset('assets/route_map.html');
+  }
+
+  Future<void> _initGps() async {
+    try {
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        return;
+      }
+      // Posición inicial
+      _gps = await Geolocator.getCurrentPosition();
+      _pushStart();
+
+      // Seguimiento en vivo: mueve el punto azul mientras el repartidor avanza
+      _posSub?.cancel();
+      _posSub = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 15, // solo actualiza al moverse ~15 m (cuida batería)
+        ),
+      ).listen((pos) {
+        _gps = pos;
+        _pushStart();
+      });
+    } catch (_) {
+      // Sin GPS: el mapa sigue funcionando; Google Maps usará la ubicación del teléfono
+    }
+  }
+
+  void _pushStops() {
+    if (!_mapReady || _controller == null) return;
+    final stops =
+        _orders.where((o) => o.hasLocation).map((o) => o.toMapStop()).toList();
+    final payload = jsonEncode(jsonEncode(stops));
+    _controller!.runJavaScript('setStops($payload);');
+  }
+
+  void _pushStart() {
+    if (!_mapReady || _controller == null || _gps == null) return;
+    _controller!.runJavaScript(
+      'setStart(${_gps!.latitude}, ${_gps!.longitude});',
+    );
+  }
+
+  void _onPinTapped(String orderIdStr) {
+    final id = int.tryParse(orderIdStr);
+    if (id == null) return;
+    OrderModel? order;
+    for (final o in _orders) {
+      if (o.orderId == id) {
+        order = o;
+        break;
+      }
+    }
+    if (order == null) return;
+    _showCard(order);
+  }
+
+  void _showCard(OrderModel order) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetCtx) => SingleChildScrollView(
+        // Respeta la barra de gestos/área segura para que la card no quede pegada
+        padding: EdgeInsets.fromLTRB(
+          12,
+          0,
+          12,
+          24 + MediaQuery.of(sheetCtx).viewPadding.bottom,
+        ),
+        child: OrderCard(
+          order: order,
+          currentDealer: Session.instance.username,
+          onComplete: () => _completeOrder(order, sheetCtx),
+          onPayment: () => _registerPayment(order, sheetCtx),
+          onTake: () => _takeOrder(order, sheetCtx),
+        ),
+      ),
+    );
   }
 
   @override
@@ -127,84 +188,25 @@ class _OrdersScreenState extends State<OrdersScreen> {
       appBar: AppBar(
         title: Text(widget.routeName),
         actions: [
-          Builder(
-            builder: (ctx) => IconButton(
-              icon: Badge(
-                isLabelVisible: _activeFiltersCount > 0,
-                label: Text('$_activeFiltersCount'),
-                child: const Icon(Icons.filter_list),
-              ),
-              tooltip: 'Filtros',
-              onPressed: () => Scaffold.of(ctx).openDrawer(),
-            ),
-          ),
           IconButton(
-            icon: const Icon(Icons.map_outlined),
-            tooltip: 'Ver ruta en el mapa',
-            onPressed: _openMap,
+            icon: const Icon(Icons.my_location),
+            tooltip: 'Mi ubicación',
+            onPressed: _initGps,
           ),
         ],
       ),
-      drawer: OrderFiltersDrawer(
-        statusFilter: _statusFilter,
-        paymentFilter: _paymentFilter,
-        orderIdSearch: _orderIdSearch,
-        customerSearch: _customerSearch,
-        timeFrom: _timeFrom,
-        timeTo: _timeTo,
-        onStatusChanged: (v) => setState(() => _statusFilter = v),
-        onPaymentChanged: (v) => setState(() => _paymentFilter = v),
-        onOrderIdChanged: (v) => setState(() => _orderIdSearch = v),
-        onCustomerChanged: (v) => setState(() => _customerSearch = v),
-        onTimeFromChanged: (v) => setState(() => _timeFrom = v),
-        onTimeToChanged: (v) => setState(() => _timeTo = v),
-        onClearFilters: _clearFilters,
-      ),
-      body: _buildOrdersList(),
+      body: _controller == null
+          ? const Center(child: CircularProgressIndicator())
+          : WebViewWidget(controller: _controller!),
     );
   }
 
-  Widget _buildOrdersList() {
-    return StreamBuilder<List<OrderModel>>(
-      stream: _ordersStream,
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return _buildMessage(
-            Icons.error_outline,
-            'Error al cargar pedidos',
-          );
-        }
-
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final orders = _applyLocalFilters(snapshot.data!);
-        _latestOrders = orders; // el mapa usa la misma lista filtrada (mi repartidor + esta ruta)
-
-        if (orders.isEmpty) {
-          return _buildMessage(
-            Icons.inbox_outlined,
-            'No hay pedidos',
-          );
-        }
-
-        return ListView.builder(
-          padding: const EdgeInsets.only(top: 8, bottom: 16),
-          itemCount: orders.length,
-          itemBuilder: (_, index) => OrderCard(
-            order: orders[index],
-            currentDealer: Session.instance.username,
-            onComplete: () => _completeOrder(orders[index]),
-            onPayment: () => _registerPayment(orders[index]),
-            onTake: () => _takeOrder(orders[index]),
-          ),
-        );
-      },
-    );
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  void _takeOrder(OrderModel order) async {
+  Future<void> _takeOrder(OrderModel order, BuildContext sheetCtx) async {
     final username = Session.instance.username;
     if (username == null) return;
 
@@ -212,7 +214,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Tomar Pedido'),
-        content: Text('¿Tomar el pedido #${order.orderId} y asignártelo?'),
+        content: Text('¿Tomar el pedido de ${order.customerName} y asignártelo?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -226,70 +228,33 @@ class _OrdersScreenState extends State<OrdersScreen> {
       ),
     );
 
-    if (confirm == true) {
-      await _orderService.takeOrder(order.orderId, username);
-    }
+    if (confirm != true) return;
+    await _orderService.takeOrder(order.orderId, username);
+    if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+    _toast('Pedido tomado');
   }
 
-  void _openMap() {
-    final withLocation = _latestOrders.where((o) => o.hasLocation).toList();
-    if (withLocation.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No hay clientes con ubicación para hoy')),
-      );
-      return;
-    }
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => RouteMapScreen(orders: withLocation)),
-    );
-  }
-
-  void _registerPayment(OrderModel order) async {
+  Future<void> _registerPayment(OrderModel order, BuildContext sheetCtx) async {
     final amount = await PaymentDialog.show(context, order);
+    if (amount == null) return;
 
-    if (amount != null) {
-      await _orderService.registerPayment(
-        order.orderId,
-        order.amountPaid + amount,
-      );
-    }
+    await _orderService.registerPayment(order.orderId, order.amountPaid + amount);
+    if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+    _toast('Pago registrado');
   }
 
-  void _completeOrder(OrderModel order) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Completar Pedido'),
-        content: Text('Marcar pedido #${order.orderId} como completado?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Completar'),
-          ),
-        ],
-      ),
-    );
+  Future<void> _completeOrder(OrderModel order, BuildContext sheetCtx) async {
+    // Cierre de entrega: ajustar kilos entregados/devueltos y cobrar el neto
+    final result = await DeliveryDialog.show(context, order);
+    if (result == null) return;
 
-    if (confirm == true) {
-      await _orderService.completeOrder(order.orderId);
-    }
-  }
-
-  Widget _buildMessage(IconData icon, String text) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 64, color: Colors.grey[400]),
-          const SizedBox(height: 12),
-          Text(text, style: TextStyle(color: Colors.grey[600], fontSize: 16)),
-        ],
-      ),
+    await _orderService.completeWithDelivery(
+      order.orderId,
+      result.items,
+      result.total,
+      result.amountPaid,
     );
+    if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+    _toast('Entrega y pago guardados');
   }
 }

@@ -54,7 +54,9 @@ class OrderCard extends StatelessWidget {
             _buildItemsList(theme),
             const Divider(height: 20),
             _buildFooter(theme),
-            if (!order.isFullyDone && order.status != 'cancelado') ...[
+            const SizedBox(height: 10),
+            _buildPayment(theme),
+            if (order.status != 'cancelado') ...[
               const SizedBox(height: 12),
               _buildActionButtons(theme),
             ],
@@ -135,26 +137,56 @@ class OrderCard extends StatelessWidget {
     );
   }
 
+  String _qty(double d) => d.toStringAsFixed(d == d.roundToDouble() ? 0 : 2);
+
+  Widget _row(ThemeData theme, String label, String value,
+      {Color? color, bool bold = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 1.5),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[700])),
+          Text(
+            value,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildItemsList(ThemeData theme) {
     return Column(
       children: order.items.map((item) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 3),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        final netKg = item.quantity - item.returned;
+        final net = netKg * item.price;
+        return Container(
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.grey.withAlpha(16),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.grey.withAlpha(40)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text(
-                  '${item.quantity.toStringAsFixed(item.quantity == item.quantity.roundToDouble() ? 0 : 1)} x ${item.name}',
-                  style: theme.textTheme.bodyMedium,
-                ),
-              ),
               Text(
-                _currencyFormat.format(item.subtotal),
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w500,
-                ),
+                item.name,
+                style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
               ),
+              const SizedBox(height: 5),
+              _row(theme, 'Entregado', '${_qty(item.quantity)} kg'),
+              _row(theme, 'Devueltos', '${_qty(item.returned)} kg',
+                  color: item.returned > 0 ? Colors.orange[800] : null),
+              _row(theme, 'Total kilos', '${_qty(netKg)} kg'),
+              const Divider(height: 14),
+              _row(theme, 'Total', _currencyFormat.format(net),
+                  color: Colors.green[800], bold: true),
             ],
           ),
         );
@@ -196,6 +228,37 @@ class OrderCard extends StatelessWidget {
     );
   }
 
+  Widget _buildPayment(ThemeData theme) {
+    final remaining = order.total - order.amountPaid;
+    final done = remaining <= 0.001;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: (done ? Colors.green : Colors.red).withAlpha(18),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            'Pagado: ${_currencyFormat.format(order.amountPaid)}',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: Colors.green[800],
+            ),
+          ),
+          Text(
+            done ? 'Pagado completo' : 'Restante: ${_currencyFormat.format(remaining)}',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: done ? Colors.green[800] : Colors.red[700],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildActionButtons(ThemeData theme) {
     if (!_isMine) {
       return SizedBox(
@@ -215,44 +278,23 @@ class OrderCard extends StatelessWidget {
       );
     }
 
-    final showPayment = onPayment != null && !order.isFullyPaid;
-    final showComplete = onComplete != null && order.status == 'pendiente';
-
-    return Row(
-      children: [
-        if (showPayment)
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: onPayment,
-              icon: const Icon(Icons.payments_outlined, size: 18),
-              label: const Text('Registrar Pago'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.blue,
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-            ),
+    // Un solo botón: abre el modal con la entrega (kilos/devoluciones) y el pago.
+    // Si ya está completo y pagado, sirve para EDITAR/corregir.
+    final done = order.isFullyDone;
+    return SizedBox(
+      width: double.infinity,
+      child: FilledButton.icon(
+        onPressed: onComplete,
+        icon: Icon(done ? Icons.edit : Icons.check_circle, size: 18),
+        label: Text(done ? 'Editar entrega / pago' : 'Completar / Pago'),
+        style: FilledButton.styleFrom(
+          backgroundColor: done ? Colors.blueGrey : Colors.green,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
           ),
-        if (showPayment && showComplete)
-          const SizedBox(width: 8),
-        if (showComplete)
-          Expanded(
-            child: FilledButton.icon(
-              onPressed: onComplete,
-              icon: const Icon(Icons.check_circle, size: 18),
-              label: const Text('Completar'),
-              style: FilledButton.styleFrom(
-                backgroundColor: Colors.green,
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-            ),
-          ),
-      ],
+        ),
+      ),
     );
   }
 

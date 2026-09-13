@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/constants/firestore_collections.dart';
+import '../models/order_item_model.dart';
 import '../models/order_model.dart';
 
 class OrderService {
@@ -42,6 +43,21 @@ class OrderService {
 
   Future<void> completeOrder(int orderId) {
     return _collection.doc(orderId.toString()).update({
+      'status': FirestoreCollections.completedStatus,
+    });
+  }
+
+  /// Completa el pedido guardando kilos entregados/devueltos, total neto y el pago.
+  Future<void> completeWithDelivery(
+    int orderId,
+    List<OrderItemModel> items,
+    double total,
+    double amountPaid,
+  ) {
+    return _collection.doc(orderId.toString()).update({
+      'items': items.map((i) => i.toMap()).toList(),
+      'total': total,
+      'amount_paid': amountPaid,
       'status': FirestoreCollections.completedStatus,
     });
   }

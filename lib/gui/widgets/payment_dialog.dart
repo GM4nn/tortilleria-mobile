@@ -46,7 +46,7 @@ class _PaymentDialogState extends State<PaymentDialog> {
     final order = widget.order;
 
     return AlertDialog(
-      title: Text('Registrar Pago - Pedido #${order.orderId}'),
+      title: Text('Registrar pago · ${order.customerName}'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

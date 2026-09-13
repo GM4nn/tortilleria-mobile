@@ -17,6 +17,9 @@ class OrderModel {
   final String? routeName;
   final String? routeColor;
   final String? deliveryTime;
+  // Ubicación de la tortillería (para ordenar la ruta por cercanía)
+  final double? shopLat;
+  final double? shopLng;
 
   const OrderModel({
     required this.orderId,
@@ -34,6 +37,8 @@ class OrderModel {
     this.routeName,
     this.routeColor,
     this.deliveryTime,
+    this.shopLat,
+    this.shopLng,
   });
 
   bool get hasLocation => customerLat != null && customerLng != null;
@@ -75,6 +80,8 @@ class OrderModel {
       routeName: map['route_name'] as String?,
       routeColor: map['route_color'] as String?,
       deliveryTime: map['delivery_time'] as String?,
+      shopLat: (map['shop_lat'] as num?)?.toDouble(),
+      shopLng: (map['shop_lng'] as num?)?.toDouble(),
     );
   }
 
@@ -93,5 +100,7 @@ class OrderModel {
             .map((i) => '${i.name} ×${i.quantity}')
             .join(', '),
         'status': status,
+        // Verde solo cuando está completado Y totalmente pagado
+        'done': isFullyDone,
       };
 }

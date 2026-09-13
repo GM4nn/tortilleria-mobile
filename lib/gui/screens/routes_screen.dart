@@ -41,7 +41,8 @@ class _RoutesScreenState extends State<RoutesScreen> {
           : o.routeName!;
       final group = map.putIfAbsent(name, () => _RouteGroup(name, o.routeColor));
       group.total++;
-      if (o.status != 'completado') group.pending++;
+      // Pendiente = aún no está completado Y pagado (y no cancelado) — igual que el pin rojo
+      if (!o.isFullyDone && o.status != 'cancelado') group.pending++;
     }
     final list = map.values.toList();
     list.sort((a, b) {
