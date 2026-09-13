@@ -44,6 +44,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
+  flutter_launcher_icons: ^0.14.3
+
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your
@@ -90,3 +92,17 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# Icono de la app (genera todos los tamaños con flutter_launcher_icons).
+# Pon tu imagen cuadrada (1024x1024 PNG) en assets/icon/app_icon.png y corre:
+#   flutter pub get
+#   dart run flutter_launcher_icons
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/app_icon.png"
+  # Android adaptativo (recomendado): fondo de color + logo con margen.
+  # Usa una versión con transparencia y márgenes para el primer plano.
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/icon/app_icon_foreground.png"
+  remove_alpha_ios: true
