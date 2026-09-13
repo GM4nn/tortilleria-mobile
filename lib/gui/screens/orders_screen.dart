@@ -179,6 +179,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
           onPayment: () => _registerPayment(order, sheetCtx),
           onTake: () => _takeOrder(order, sheetCtx),
           onNotes: () => _editNotes(order, sheetCtx),
+          onNavigate: () => _navigateTo(order),
         ),
       ),
     );
@@ -243,6 +244,19 @@ class _OrdersScreenState extends State<OrdersScreen> {
     await _orderService.registerPayment(order.orderId, order.amountPaid + amount);
     if (sheetCtx.mounted) Navigator.pop(sheetCtx);
     _toast('Pago registrado');
+  }
+
+  // Ruta a un solo cliente en Google Maps (coordenada exacta desde tu ubicación)
+  Future<void> _navigateTo(OrderModel order) async {
+    if (!order.hasLocation) {
+      _toast('Este cliente no tiene ubicación');
+      return;
+    }
+    final uri = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&travelmode=driving'
+      '&destination=${order.customerLat},${order.customerLng}',
+    );
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   Future<void> _editNotes(OrderModel order, BuildContext sheetCtx) async {

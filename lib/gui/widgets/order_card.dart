@@ -10,6 +10,7 @@ class OrderCard extends StatelessWidget {
   final VoidCallback? onPayment;
   final VoidCallback? onTake;
   final VoidCallback? onNotes;
+  final VoidCallback? onNavigate;
 
   const OrderCard({
     super.key,
@@ -19,6 +20,7 @@ class OrderCard extends StatelessWidget {
     this.onPayment,
     this.onTake,
     this.onNotes,
+    this.onNavigate,
   });
 
   bool get _isMine => order.ownedBy(currentDealer);
@@ -52,6 +54,10 @@ class OrderCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildHeader(theme),
+            if (order.hasLocation && onNavigate != null) ...[
+              const SizedBox(height: 10),
+              _buildNavigate(theme),
+            ],
             const Divider(height: 20),
             _buildItemsList(theme),
             const Divider(height: 20),
@@ -259,6 +265,23 @@ class OrderCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildNavigate(ThemeData theme) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: onNavigate,
+        icon: const Icon(Icons.directions, size: 18),
+        label: const Text('Cómo llegar (Google Maps)'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFF1a73e8),
+          side: const BorderSide(color: Color(0xFF1a73e8)),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
       ),
     );
   }
