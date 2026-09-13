@@ -8,6 +8,7 @@ class OrderModel {
   final double amountPaid;
   final String status;
   final String createdAt;
+  final String? notes;
   final String? defaultDealer;
   // Ubicación + ruta (para el mapa)
   final double? customerLat;
@@ -29,6 +30,7 @@ class OrderModel {
     required this.amountPaid,
     required this.status,
     required this.createdAt,
+    this.notes,
     this.defaultDealer,
     this.customerLat,
     this.customerLng,
@@ -70,6 +72,7 @@ class OrderModel {
       amountPaid: (map['amount_paid'] as num?)?.toDouble() ?? 0.0,
       status: map['status'] ?? 'pendiente',
       createdAt: map['created_at'] ?? '',
+      notes: (map['notes'] as String?)?.isNotEmpty == true ? map['notes'] : null,
       defaultDealer: (map['default_dealer'] as String?)?.isNotEmpty == true
           ? map['default_dealer']
           : null,

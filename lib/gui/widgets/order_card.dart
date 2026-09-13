@@ -9,6 +9,7 @@ class OrderCard extends StatelessWidget {
   final VoidCallback? onComplete;
   final VoidCallback? onPayment;
   final VoidCallback? onTake;
+  final VoidCallback? onNotes;
 
   const OrderCard({
     super.key,
@@ -17,6 +18,7 @@ class OrderCard extends StatelessWidget {
     this.onComplete,
     this.onPayment,
     this.onTake,
+    this.onNotes,
   });
 
   bool get _isMine => order.ownedBy(currentDealer);
@@ -56,6 +58,8 @@ class OrderCard extends StatelessWidget {
             _buildFooter(theme),
             const SizedBox(height: 10),
             _buildPayment(theme),
+            const SizedBox(height: 10),
+            _buildNotes(theme),
             if (order.status != 'cancelado') ...[
               const SizedBox(height: 12),
               _buildActionButtons(theme),
@@ -254,6 +258,61 @@ class OrderCard extends StatelessWidget {
               color: done ? Colors.green[800] : Colors.red[700],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNotes(ThemeData theme) {
+    final note = order.notes;
+    final hasNote = note != null && note.trim().isNotEmpty;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.amber.withAlpha(hasNote ? 30 : 14),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.amber.withAlpha(70)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.sticky_note_2_outlined,
+                  size: 16, color: Colors.amber[800]),
+              const SizedBox(width: 4),
+              Text(
+                'Notas',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: Colors.amber[900],
+                ),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: onNotes,
+                icon: Icon(hasNote ? Icons.edit : Icons.add, size: 16),
+                label: Text(hasNote ? 'Editar' : 'Agregar'),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.amber[900],
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ],
+          ),
+          if (hasNote)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(note.trim(), style: theme.textTheme.bodyMedium),
+            )
+          else
+            Text(
+              'Sin notas. Toca "Agregar" para escribir una.',
+              style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
+            ),
         ],
       ),
     );

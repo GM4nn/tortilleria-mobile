@@ -67,4 +67,11 @@ class OrderService {
       'amount_paid': newAmountPaid,
     });
   }
+
+  /// Guarda la descripción / notas del pedido (se sincroniza a SQLite en el back).
+  Future<void> updateNotes(int orderId, String notes) {
+    return _collection.doc(orderId.toString()).update({
+      'notes': notes,
+    });
+  }
 }

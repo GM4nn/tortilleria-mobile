@@ -11,6 +11,7 @@ import '../../data/models/order_model.dart';
 import '../../data/services/order_service.dart';
 import '../../data/services/session.dart';
 import '../widgets/delivery_dialog.dart';
+import '../widgets/notes_dialog.dart';
 import '../widgets/order_card.dart';
 import '../widgets/payment_dialog.dart';
 
@@ -177,6 +178,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
           onComplete: () => _completeOrder(order, sheetCtx),
           onPayment: () => _registerPayment(order, sheetCtx),
           onTake: () => _takeOrder(order, sheetCtx),
+          onNotes: () => _editNotes(order, sheetCtx),
         ),
       ),
     );
@@ -241,6 +243,15 @@ class _OrdersScreenState extends State<OrdersScreen> {
     await _orderService.registerPayment(order.orderId, order.amountPaid + amount);
     if (sheetCtx.mounted) Navigator.pop(sheetCtx);
     _toast('Pago registrado');
+  }
+
+  Future<void> _editNotes(OrderModel order, BuildContext sheetCtx) async {
+    final notes = await NotesDialog.show(context, order);
+    if (notes == null) return; // canceló
+
+    await _orderService.updateNotes(order.orderId, notes);
+    if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+    _toast('Nota guardada');
   }
 
   Future<void> _completeOrder(OrderModel order, BuildContext sheetCtx) async {
