@@ -8,7 +8,9 @@ class DeliveryResult {
   final List<OrderItemModel> items;
   final double total;
   final double amountPaid; // total pagado tras este cierre (existente + lo de ahora)
-  const DeliveryResult(this.items, this.total, this.amountPaid);
+  final bool complete; // true = completar; false = solo guardar info (pendiente)
+  const DeliveryResult(this.items, this.total, this.amountPaid,
+      {this.complete = true});
 }
 
 /// Una línea editable del cierre (producto + kilos entregados/devueltos).
@@ -218,7 +220,7 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
     );
   }
 
-  void _submit() {
+  void _submit({required bool complete}) {
     final items = <OrderItemModel>[];
     for (final l in _lines) {
       final del = _num(l.delivered), ret = _num(l.returned);
@@ -231,7 +233,10 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
         subtotal: del * l.price,
       ));
     }
-    Navigator.pop(context, DeliveryResult(items, _total, _newPaid));
+    Navigator.pop(
+      context,
+      DeliveryResult(items, _total, _newPaid, complete: complete),
+    );
   }
 
   @override
@@ -378,12 +383,23 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
           ),
         ),
       ),
+      actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancelar'),
         ),
-        FilledButton(onPressed: _submit, child: const Text('Completar')),
+        FilledButton.tonalIcon(
+          onPressed: () => _submit(complete: false),
+          icon: const Icon(Icons.save_outlined, size: 18),
+          label: const Text('Guardar info'),
+        ),
+        FilledButton.icon(
+          onPressed: () => _submit(complete: true),
+          icon: const Icon(Icons.check_circle, size: 18),
+          label: const Text('Completar'),
+          style: FilledButton.styleFrom(backgroundColor: Colors.green),
+        ),
       ],
     );
   }

@@ -62,6 +62,20 @@ class OrderService {
     });
   }
 
+  /// Guarda la info del pedido (kilos/total/pago) SIN completarlo (sigue pendiente).
+  Future<void> saveDelivery(
+    int orderId,
+    List<OrderItemModel> items,
+    double total,
+    double amountPaid,
+  ) {
+    return _collection.doc(orderId.toString()).update({
+      'items': items.map((i) => i.toMap()).toList(),
+      'total': total,
+      'amount_paid': amountPaid,
+    });
+  }
+
   Future<void> registerPayment(int orderId, double newAmountPaid) {
     return _collection.doc(orderId.toString()).update({
       'amount_paid': newAmountPaid,

@@ -1,9 +1,15 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../data/models/order_model.dart';
 import 'order_status_badge.dart';
 
-class OrderCard extends StatelessWidget {
+class OrderCard extends StatefulWidget {
   final OrderModel order;
   final String? currentDealer;
   final VoidCallback? onComplete;
@@ -23,13 +29,55 @@ class OrderCard extends StatelessWidget {
     this.onNavigate,
   });
 
+  @override
+  State<OrderCard> createState() => _OrderCardState();
+}
+
+class _OrderCardState extends State<OrderCard> {
+  final GlobalKey _shareKey = GlobalKey();
+  bool _sharing = false;
+
+  OrderModel get order => widget.order;
+
   // Cualquier repartidor de la ruta puede operar el pedido (sin "tomar")
-  bool get _isMine => order.visibleTo(currentDealer);
+  bool get _isMine => order.visibleTo(widget.currentDealer);
 
   static final _currencyFormat = NumberFormat.currency(
     locale: 'es_MX',
     symbol: '\$',
   );
+
+  // Captura la parte informativa de la card como PNG y abre el compartir
+  // de Android (WhatsApp, etc.).
+  Future<void> _share() async {
+    if (_sharing) return;
+    setState(() => _sharing = true);
+    try {
+      await Future.delayed(const Duration(milliseconds: 20));
+      final boundary =
+          _shareKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+      final image = await boundary.toImage(pixelRatio: 3.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      final bytes = byteData!.buffer.asUint8List();
+
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/pedido_${order.orderId}.png');
+      await file.writeAsBytes(bytes);
+
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'image/png')],
+        text: 'Pedido de ${order.customerName}',
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se pudo compartir el pedido')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sharing = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -38,6 +86,7 @@ class OrderCard extends StatelessWidget {
     return Card(
       elevation: 3,
       shadowColor: Colors.black26,
+      clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
         side: BorderSide(
@@ -49,30 +98,65 @@ class OrderCard extends StatelessWidget {
           width: 1.5,
         ),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildHeader(theme),
-            if (order.hasLocation && onNavigate != null) ...[
-              const SizedBox(height: 10),
-              _buildNavigate(theme),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Stack(
+            children: [
+              // Lo que entra en la imagen a compartir (con su propio margen)
+              RepaintBoundary(
+                key: _shareKey,
+                child: Container(
+                  width: double.infinity,
+                  color: theme.cardColor,
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildHeader(theme),
+                      const Divider(height: 20),
+                      _buildItemsList(theme),
+                      const Divider(height: 20),
+                      _buildFooter(theme),
+                      const SizedBox(height: 10),
+                      _buildPayment(theme),
+                      const SizedBox(height: 10),
+                      _buildNotes(theme),
+                    ],
+                  ),
+                ),
+              ),
+              // Ícono de compartir (esquina superior derecha, fuera de la imagen)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: IconButton(
+                  onPressed: _sharing ? null : _share,
+                  tooltip: 'Compartir',
+                  icon: _sharing
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.share, color: Color(0xFF25D366)),
+                ),
+              ),
             ],
-            const Divider(height: 20),
-            _buildItemsList(theme),
-            const Divider(height: 20),
-            _buildFooter(theme),
-            const SizedBox(height: 10),
-            _buildPayment(theme),
-            const SizedBox(height: 10),
-            _buildNotes(theme),
-            if (order.status != 'cancelado') ...[
-              const SizedBox(height: 12),
-              _buildActionButtons(theme),
-            ],
-          ],
-        ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+            child: Column(
+              children: [
+                if (order.hasLocation && widget.onNavigate != null) ...[
+                  _buildNavigate(theme),
+                  const SizedBox(height: 10),
+                ],
+                if (order.status != 'cancelado') _buildActionButtons(theme),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -274,7 +358,7 @@ class OrderCard extends StatelessWidget {
     return SizedBox(
       width: double.infinity,
       child: OutlinedButton.icon(
-        onPressed: onNavigate,
+        onPressed: widget.onNavigate,
         icon: const Icon(Icons.directions, size: 18),
         label: const Text('Cómo llegar (Google Maps)'),
         style: OutlinedButton.styleFrom(
@@ -315,7 +399,7 @@ class OrderCard extends StatelessWidget {
               ),
               const Spacer(),
               TextButton.icon(
-                onPressed: onNotes,
+                onPressed: widget.onNotes,
                 icon: Icon(hasNote ? Icons.edit : Icons.add, size: 16),
                 label: Text(hasNote ? 'Editar' : 'Agregar'),
                 style: TextButton.styleFrom(
@@ -347,7 +431,7 @@ class OrderCard extends StatelessWidget {
       return SizedBox(
         width: double.infinity,
         child: OutlinedButton.icon(
-          onPressed: onTake,
+          onPressed: widget.onTake,
           icon: const Icon(Icons.pan_tool_alt_outlined, size: 18),
           label: const Text('Tomar'),
           style: OutlinedButton.styleFrom(
@@ -367,7 +451,7 @@ class OrderCard extends StatelessWidget {
     return SizedBox(
       width: double.infinity,
       child: FilledButton.icon(
-        onPressed: onComplete,
+        onPressed: widget.onComplete,
         icon: Icon(done ? Icons.edit : Icons.check_circle, size: 18),
         label: Text(done ? 'Editar entrega / pago' : 'Completar / Pago'),
         style: FilledButton.styleFrom(

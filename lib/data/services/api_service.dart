@@ -47,17 +47,20 @@ class ApiService {
   Future<Map<String, dynamic>> registerPayment(int orderId, double amountPaid) =>
       _post('/mobile/orders/$orderId/payment', {'amount_paid': amountPaid});
 
-  /// Cierra la entrega: kilos entregados/devueltos, total neto y pago.
+  /// Guarda la entrega: kilos entregados/devueltos, total neto y pago.
+  /// [complete] true = marca completado; false = solo guarda (sigue pendiente).
   Future<Map<String, dynamic>> completeDelivery(
     int orderId,
     List<OrderItemModel> items,
     double total,
-    double amountPaid,
-  ) =>
+    double amountPaid, {
+    bool complete = true,
+  }) =>
       _post('/mobile/orders/$orderId/complete', {
         'items': items.map((i) => i.toMap()).toList(),
         'total': total,
         'amount_paid': amountPaid,
+        'complete': complete,
       });
 }
 

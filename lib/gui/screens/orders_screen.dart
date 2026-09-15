@@ -423,22 +423,32 @@ class _OrdersScreenState extends State<OrdersScreen> {
         result.items,
         result.total,
         result.amountPaid,
+        complete: result.complete,
       );
       // Firestore (mapa en tiempo real)
-      await _orderService.completeWithDelivery(
-        order.orderId,
-        result.items,
-        result.total,
-        result.amountPaid,
-      );
+      if (result.complete) {
+        await _orderService.completeWithDelivery(
+          order.orderId,
+          result.items,
+          result.total,
+          result.amountPaid,
+        );
+      } else {
+        await _orderService.saveDelivery(
+          order.orderId,
+          result.items,
+          result.total,
+          result.amountPaid,
+        );
+      }
     } on ApiException catch (e) {
       _toast(e.message);
       return;
     } catch (_) {
-      _toast('No se pudo guardar la entrega. Revisa tu conexión.');
+      _toast('No se pudo guardar. Revisa tu conexión.');
       return;
     }
     if (sheetCtx.mounted) Navigator.pop(sheetCtx);
-    _toast('Entrega y pago guardados');
+    _toast(result.complete ? 'Entrega y pago guardados' : 'Info guardada');
   }
 }
