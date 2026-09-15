@@ -379,28 +379,46 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
                 'puedes dejarlo parcial o en 0. Aquí también corriges si te confundiste.',
                 style: TextStyle(fontSize: 11, color: Colors.grey[600]),
               ),
+              const SizedBox(height: 16),
+              // Botones en fila (se reparten el ancho para que no se apilen)
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      child: const Text('Cancelar'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton.tonal(
+                      onPressed: () => _submit(complete: false),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      child: const Text('Guardar'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () => _submit(complete: true),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      child: const Text('Completar'),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
       ),
-      actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancelar'),
-        ),
-        FilledButton.tonalIcon(
-          onPressed: () => _submit(complete: false),
-          icon: const Icon(Icons.save_outlined, size: 18),
-          label: const Text('Guardar info'),
-        ),
-        FilledButton.icon(
-          onPressed: () => _submit(complete: true),
-          icon: const Icon(Icons.check_circle, size: 18),
-          label: const Text('Completar'),
-          style: FilledButton.styleFrom(backgroundColor: Colors.green),
-        ),
-      ],
     );
   }
 
