@@ -7,8 +7,13 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/utils/route_order.dart';
+import '../../data/models/catalog_product.dart';
+import '../../data/models/customer_model.dart';
 import '../../data/models/order_model.dart';
+import '../../data/services/api_service.dart';
+import '../../data/services/customer_service.dart';
 import '../../data/services/order_service.dart';
+import '../../data/services/product_service.dart';
 import '../../data/services/session.dart';
 import '../widgets/delivery_dialog.dart';
 import '../widgets/notes_dialog.dart';
@@ -31,11 +36,18 @@ class OrdersScreen extends StatefulWidget {
 
 class _OrdersScreenState extends State<OrdersScreen> {
   final _orderService = OrderService();
+  final _customerService = CustomerService();
+  final _productService = ProductService();
+  final _apiService = ApiService();
 
   WebViewController? _controller;
   StreamSubscription<List<OrderModel>>? _sub;
+  StreamSubscription<List<CustomerModel>>? _custSub;
+  StreamSubscription<List<CatalogProduct>>? _prodSub;
   StreamSubscription<Position>? _posSub;
   List<OrderModel> _orders = [];
+  List<CustomerModel> _customers = [];
+  List<CatalogProduct> _products = [];
   Position? _gps;
   bool _mapReady = false;
 
@@ -47,12 +59,22 @@ class _OrdersScreenState extends State<OrdersScreen> {
     _sub = _orderService.watchOrders().listen((data) {
       _orders = _applyLocalFilters(data);
       _pushStops();
+      _pushPending();
+    });
+    _custSub = _customerService.watchCustomers().listen((data) {
+      _customers = data;
+      _pushPending();
+    });
+    _prodSub = _productService.watchProducts().listen((data) {
+      _products = data;
     });
   }
 
   @override
   void dispose() {
     _sub?.cancel();
+    _custSub?.cancel();
+    _prodSub?.cancel();
     _posSub?.cancel();
     super.dispose();
   }
@@ -62,7 +84,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
     final me = Session.instance.username;
     final noRoute = widget.routeName == 'Sin ruta';
     final filtered = orders.where((o) {
-      if (o.defaultDealer != me) return false;
+      if (!o.visibleTo(me)) return false;
       final rn = (o.routeName == null || o.routeName!.isEmpty)
           ? 'Sin ruta'
           : o.routeName!;
@@ -88,11 +110,16 @@ class _OrdersScreenState extends State<OrdersScreen> {
         'OrderChannel',
         onMessageReceived: (msg) => _onPinTapped(msg.message),
       )
+      ..addJavaScriptChannel(
+        'GenerateChannel',
+        onMessageReceived: (msg) => _onGenerate(msg.message),
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (_) {
             _mapReady = true;
             _pushStops();
+            _pushPending();
             _pushStart();
           },
         ),
@@ -143,6 +170,81 @@ class _OrdersScreenState extends State<OrdersScreen> {
     _controller!.runJavaScript(
       'setStart(${_gps!.latitude}, ${_gps!.longitude});',
     );
+  }
+
+  // Clientes de esta ruta que aún NO tienen pedido hoy → pines grises
+  void _pushPending() {
+    if (!_mapReady || _controller == null) return;
+    final me = Session.instance.username;
+    final noRoute = widget.routeName == 'Sin ruta';
+    // Clientes que YA tienen pedido hoy: por id y, como respaldo, por nombre
+    // (para pedidos viejos cuyo doc aún no traía customer_id).
+    final withOrderIds =
+        _orders.map((o) => o.customerId).whereType<int>().toSet();
+    final withOrderNames = _orders
+        .map((o) => o.customerName.trim().toLowerCase())
+        .where((n) => n.isNotEmpty)
+        .toSet();
+    final pending = _customers.where((c) {
+      if (!c.hasLocation) return false;
+      if (withOrderIds.contains(c.id)) return false;
+      if (withOrderNames.contains(c.name.trim().toLowerCase())) return false;
+      final rn = (c.routeName == null || c.routeName!.isEmpty)
+          ? 'Sin ruta'
+          : c.routeName!;
+      if (noRoute) return rn == 'Sin ruta';
+      return rn == widget.routeName && c.routeDealers.contains(me);
+    }).map((c) => {
+          'customer_id': c.id,
+          'name': c.name,
+          'lat': c.lat,
+          'lng': c.lng,
+        }).toList();
+    final payload = jsonEncode(jsonEncode(pending));
+    _controller!.runJavaScript('setPending($payload);');
+  }
+
+  void _onGenerate(String customerIdStr) {
+    final id = int.tryParse(customerIdStr);
+    if (id == null) return;
+    CustomerModel? customer;
+    for (final c in _customers) {
+      if (c.id == id) {
+        customer = c;
+        break;
+      }
+    }
+    _confirmGenerate(id, customer?.name ?? 'este cliente');
+  }
+
+  Future<void> _confirmGenerate(int customerId, String name) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Generar pedido de hoy'),
+        content: Text('¿Crear el pedido de hoy para $name?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Sí, crear'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    _toast('Generando pedido de $name...');
+    try {
+      await _apiService.generateOrder(customerId);
+      // El pedido aparece solo en el mapa vía el stream de Firestore
+    } on ApiException catch (e) {
+      _toast(e.message);
+    } catch (_) {
+      _toast('No se pudo generar el pedido. Revisa tu conexión.');
+    }
   }
 
   void _onPinTapped(String orderIdStr) {
@@ -241,7 +343,17 @@ class _OrdersScreenState extends State<OrdersScreen> {
     final amount = await PaymentDialog.show(context, order);
     if (amount == null) return;
 
-    await _orderService.registerPayment(order.orderId, order.amountPaid + amount);
+    final newTotal = order.amountPaid + amount;
+    try {
+      await _apiService.registerPayment(order.orderId, newTotal); // SQLite
+      await _orderService.registerPayment(order.orderId, newTotal); // Firestore
+    } on ApiException catch (e) {
+      _toast(e.message);
+      return;
+    } catch (_) {
+      _toast('No se pudo registrar el pago. Revisa tu conexión.');
+      return;
+    }
     if (sheetCtx.mounted) Navigator.pop(sheetCtx);
     _toast('Pago registrado');
   }
@@ -263,22 +375,69 @@ class _OrdersScreenState extends State<OrdersScreen> {
     final notes = await NotesDialog.show(context, order);
     if (notes == null) return; // canceló
 
-    await _orderService.updateNotes(order.orderId, notes);
+    try {
+      await _apiService.updateNotes(order.orderId, notes); // SQLite
+      await _orderService.updateNotes(order.orderId, notes); // Firestore
+    } on ApiException catch (e) {
+      _toast(e.message);
+      return;
+    } catch (_) {
+      _toast('No se pudo guardar la nota. Revisa tu conexión.');
+      return;
+    }
     if (sheetCtx.mounted) Navigator.pop(sheetCtx);
     _toast('Nota guardada');
   }
 
+  // Catálogo para "Agregar producto": productos globales con el precio del
+  // cliente (mapa 'prices' del cliente); si no tiene, precio base.
+  List<CatalogProduct> _catalogFor(OrderModel order) {
+    CustomerModel? c;
+    for (final x in _customers) {
+      if (x.id == order.customerId) {
+        c = x;
+        break;
+      }
+    }
+    final prices = c?.prices ?? const {};
+    return _products
+        .map((p) => CatalogProduct(
+              productId: p.productId,
+              name: p.name,
+              icon: p.icon,
+              price: prices[p.productId] ?? p.price,
+            ))
+        .toList();
+  }
+
   Future<void> _completeOrder(OrderModel order, BuildContext sheetCtx) async {
     // Cierre de entrega: ajustar kilos entregados/devueltos y cobrar el neto
-    final result = await DeliveryDialog.show(context, order);
+    final result =
+        await DeliveryDialog.show(context, order, catalog: _catalogFor(order));
     if (result == null) return;
 
-    await _orderService.completeWithDelivery(
-      order.orderId,
-      result.items,
-      result.total,
-      result.amountPaid,
-    );
+    try {
+      // SQLite (fuente de verdad)
+      await _apiService.completeDelivery(
+        order.orderId,
+        result.items,
+        result.total,
+        result.amountPaid,
+      );
+      // Firestore (mapa en tiempo real)
+      await _orderService.completeWithDelivery(
+        order.orderId,
+        result.items,
+        result.total,
+        result.amountPaid,
+      );
+    } on ApiException catch (e) {
+      _toast(e.message);
+      return;
+    } catch (_) {
+      _toast('No se pudo guardar la entrega. Revisa tu conexión.');
+      return;
+    }
     if (sheetCtx.mounted) Navigator.pop(sheetCtx);
     _toast('Entrega y pago guardados');
   }

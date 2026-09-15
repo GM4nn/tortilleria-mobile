@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../../data/models/order_model.dart';
+import '../../data/models/route_model.dart';
 import '../../data/services/order_service.dart';
+import '../../data/services/route_service.dart';
 import '../../data/services/session.dart';
 import 'login_screen.dart';
 import 'orders_screen.dart';
@@ -15,7 +19,8 @@ class _RouteGroup {
 }
 
 /// Pantalla inicial del repartidor: lista de rutas (con los pedidos de hoy).
-/// Al tocar una ruta se abre el listado de pedidos filtrado a esa ruta.
+/// Muestra también las rutas asignadas aunque no tengan pedidos hoy, para poder
+/// abrir el mapa y generar pedidos tocando a los clientes en gris.
 class RoutesScreen extends StatefulWidget {
   const RoutesScreen({super.key});
 
@@ -25,6 +30,37 @@ class RoutesScreen extends StatefulWidget {
 
 class _RoutesScreenState extends State<RoutesScreen> {
   final _orderService = OrderService();
+  final _routeService = RouteService();
+
+  StreamSubscription<List<OrderModel>>? _orderSub;
+  StreamSubscription<List<RouteModel>>? _routeSub;
+  List<OrderModel> _orders = [];
+  List<RouteModel> _routes = [];
+  bool _ordersReady = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final me = Session.instance.username;
+    _orderSub = _orderService.watchOrders().listen((data) {
+      setState(() {
+        _orders = data.where((o) => o.visibleTo(me)).toList();
+        _ordersReady = true;
+      });
+    });
+    if (me != null) {
+      _routeSub = _routeService.watchMyRoutes(me).listen((data) {
+        setState(() => _routes = data);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _orderSub?.cancel();
+    _routeSub?.cancel();
+    super.dispose();
+  }
 
   Color _parseColor(String? hex) {
     if (hex == null || hex.isEmpty) return const Color(0xFF4CC9F0);
@@ -33,15 +69,19 @@ class _RoutesScreenState extends State<RoutesScreen> {
     return Color(value + 0xFF000000);
   }
 
-  List<_RouteGroup> _group(List<OrderModel> orders) {
+  List<_RouteGroup> _group() {
     final map = <String, _RouteGroup>{};
-    for (final o in orders) {
+    // Semilla: mis rutas asignadas (aunque no tengan pedidos hoy)
+    for (final r in _routes) {
+      map[r.name] = _RouteGroup(r.name, r.color);
+    }
+    // Pedidos de hoy
+    for (final o in _orders) {
       final name = (o.routeName == null || o.routeName!.isEmpty)
           ? 'Sin ruta'
           : o.routeName!;
       final group = map.putIfAbsent(name, () => _RouteGroup(name, o.routeColor));
       group.total++;
-      // Pendiente = aún no está completado Y pagado (y no cancelado) — igual que el pin rojo
       if (!o.isFullyDone && o.status != 'cancelado') group.pending++;
     }
     final list = map.values.toList();
@@ -82,72 +122,60 @@ class _RoutesScreenState extends State<RoutesScreen> {
           ),
         ],
       ),
-      body: StreamBuilder<List<OrderModel>>(
-        stream: _orderService.watchOrders(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return _buildMessage(Icons.error_outline, 'Error al cargar las rutas');
-          }
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
+      body: _buildBody(),
+    );
+  }
 
-          // Solo los pedidos asignados a este repartidor
-          final me = Session.instance.username;
-          final mine =
-              snapshot.data!.where((o) => o.defaultDealer == me).toList();
-
-          final groups = _group(mine);
-          if (groups.isEmpty) {
-            return _buildMessage(
-              Icons.inbox_outlined,
-              'No tienes rutas asignadas hoy',
-            );
-          }
-
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: groups.length,
-            itemBuilder: (_, index) {
-              final group = groups[index];
-              final color = _parseColor(group.color);
-              return Card(
-                margin: const EdgeInsets.only(bottom: 10),
-                child: ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: color,
-                    child: Text(
-                      '${group.total}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  title: Text(
-                    group.name,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  subtitle: Text(
-                    '${group.total} pedido${group.total == 1 ? '' : 's'} · '
-                    '${group.pending} pendiente${group.pending == 1 ? '' : 's'}',
-                  ),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => OrdersScreen(
-                        routeName: group.name,
-                        routeColor: group.color,
-                      ),
-                    ),
-                  ),
+  Widget _buildBody() {
+    if (!_ordersReady && _routes.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final groups = _group();
+    if (groups.isEmpty) {
+      return _buildMessage(Icons.inbox_outlined, 'No tienes rutas asignadas');
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: groups.length,
+      itemBuilder: (_, index) {
+        final group = groups[index];
+        final color = _parseColor(group.color);
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          child: ListTile(
+            leading: CircleAvatar(
+              backgroundColor: color,
+              child: Text(
+                '${group.total}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
                 ),
-              );
-            },
-          );
-        },
-      ),
+              ),
+            ),
+            title: Text(
+              group.name,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            subtitle: Text(
+              group.total == 0
+                  ? 'Sin pedidos hoy · toca para generar'
+                  : '${group.total} pedido${group.total == 1 ? '' : 's'} · '
+                      '${group.pending} pendiente${group.pending == 1 ? '' : 's'}',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => OrdersScreen(
+                  routeName: group.name,
+                  routeColor: group.color,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 

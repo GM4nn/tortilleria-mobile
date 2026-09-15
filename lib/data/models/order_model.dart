@@ -3,6 +3,7 @@ import 'order_item_model.dart';
 class OrderModel {
   final int orderId;
   final String customerName;
+  final int? customerId;
   final List<OrderItemModel> items;
   final double total;
   final double amountPaid;
@@ -17,6 +18,7 @@ class OrderModel {
   final int? routeId;
   final String? routeName;
   final String? routeColor;
+  final List<String> routeDealers;
   final String? deliveryTime;
   // Ubicación de la tortillería (para ordenar la ruta por cercanía)
   final double? shopLat;
@@ -25,6 +27,7 @@ class OrderModel {
   const OrderModel({
     required this.orderId,
     required this.customerName,
+    this.customerId,
     required this.items,
     required this.total,
     required this.amountPaid,
@@ -38,6 +41,7 @@ class OrderModel {
     this.routeId,
     this.routeName,
     this.routeColor,
+    this.routeDealers = const [],
     this.deliveryTime,
     this.shopLat,
     this.shopLng,
@@ -59,12 +63,20 @@ class OrderModel {
   bool ownedBy(String? username) =>
       username != null && defaultDealer == username;
 
+  /// Le aparece a este repartidor si es suyo o si pertenece a la ruta. Así, al
+  /// poner varios repartidores en una ruta, a todos les aparece esa ruta.
+  bool visibleTo(String? username) {
+    if (username == null) return false;
+    return defaultDealer == username || routeDealers.contains(username);
+  }
+
   factory OrderModel.fromMap(Map<String, dynamic> map) {
     final rawItems = map['items'] as List<dynamic>? ?? [];
 
     return OrderModel(
       orderId: (map['order_id'] as num).toInt(),
       customerName: map['customer_name'] ?? '',
+      customerId: (map['customer_id'] as num?)?.toInt(),
       items: rawItems
           .map((item) => OrderItemModel.fromMap(item as Map<String, dynamic>))
           .toList(),
@@ -82,6 +94,9 @@ class OrderModel {
       routeId: (map['route_id'] as num?)?.toInt(),
       routeName: map['route_name'] as String?,
       routeColor: map['route_color'] as String?,
+      routeDealers: (map['route_dealers'] as List<dynamic>? ?? [])
+          .map((e) => e.toString())
+          .toList(),
       deliveryTime: map['delivery_time'] as String?,
       shopLat: (map['shop_lat'] as num?)?.toDouble(),
       shopLng: (map['shop_lng'] as num?)?.toDouble(),

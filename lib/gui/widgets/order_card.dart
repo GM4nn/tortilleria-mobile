@@ -23,7 +23,8 @@ class OrderCard extends StatelessWidget {
     this.onNavigate,
   });
 
-  bool get _isMine => order.ownedBy(currentDealer);
+  // Cualquier repartidor de la ruta puede operar el pedido (sin "tomar")
+  bool get _isMine => order.visibleTo(currentDealer);
 
   static final _currencyFormat = NumberFormat.currency(
     locale: 'es_MX',
