@@ -71,19 +71,21 @@ class OrderModel {
   }
 
   factory OrderModel.fromMap(Map<String, dynamic> map) {
-    final rawItems = map['items'] as List<dynamic>? ?? [];
+    final rawItems = (map['items'] ?? map['details']) as List<dynamic>? ?? [];
+    final orderId = (map['order_id'] ?? map['id']) as num?;
+    final dateStr = map['created_at'] ?? map['date'] ?? '';
 
     return OrderModel(
-      orderId: (map['order_id'] as num).toInt(),
+      orderId: orderId?.toInt() ?? 0,
       customerName: map['customer_name'] ?? '',
       customerId: (map['customer_id'] as num?)?.toInt(),
       items: rawItems
           .map((item) => OrderItemModel.fromMap(item as Map<String, dynamic>))
           .toList(),
-      total: (map['total'] as num).toDouble(),
+      total: (map['total'] as num?)?.toDouble() ?? 0.0,
       amountPaid: (map['amount_paid'] as num?)?.toDouble() ?? 0.0,
       status: map['status'] ?? 'pendiente',
-      createdAt: map['created_at'] ?? '',
+      createdAt: dateStr,
       notes: (map['notes'] as String?)?.isNotEmpty == true ? map['notes'] : null,
       defaultDealer: (map['default_dealer'] as String?)?.isNotEmpty == true
           ? map['default_dealer']
@@ -106,6 +108,7 @@ class OrderModel {
   /// Representación ligera para inyectar al mapa (WebView).
   Map<String, dynamic> toMapStop() => {
         'order_id': orderId,
+        'customer_id': customerId,
         'name': customerName,
         'lat': customerLat,
         'lng': customerLng,

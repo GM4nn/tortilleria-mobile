@@ -62,6 +62,23 @@ class ApiService {
         'amount_paid': amountPaid,
         'complete': complete,
       });
+
+  /// Órdenes pendientes de entrega o pago parcial (semanas anteriores).
+  Future<List<Map<String, dynamic>>> getPendingOrders() =>
+      _get('/mobile/pending-orders');
+
+  Future<List<Map<String, dynamic>>> _get(String path) async {
+    final res = await http
+        .get(
+          Uri.parse('${ApiConfig.baseUrl}$path'),
+        )
+        .timeout(const Duration(seconds: 20));
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      final body = res.body.isEmpty ? [] : jsonDecode(res.body);
+      return List<Map<String, dynamic>>.from(body as List);
+    }
+    throw ApiException(_detail(res));
+  }
 }
 
 class ApiException implements Exception {

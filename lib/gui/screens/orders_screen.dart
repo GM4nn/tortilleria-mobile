@@ -19,6 +19,7 @@ import '../widgets/delivery_dialog.dart';
 import '../widgets/notes_dialog.dart';
 import '../widgets/order_card.dart';
 import '../widgets/payment_dialog.dart';
+import 'pending_customer_orders_screen.dart';
 
 /// Vista principal de una ruta: el MAPA con las paradas en orden (más cercano →
 /// más lejano desde la tortillería). Traza la ruta desde el GPS del repartidor,
@@ -50,6 +51,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
   List<CatalogProduct> _products = [];
   Position? _gps;
   bool _mapReady = false;
+  bool _pendingMode = false;
 
   @override
   void initState() {
@@ -113,6 +115,17 @@ class _OrdersScreenState extends State<OrdersScreen> {
       ..addJavaScriptChannel(
         'GenerateChannel',
         onMessageReceived: (msg) => _onGenerate(msg.message),
+      )
+      ..addJavaScriptChannel(
+        'PendingChannel',
+        onMessageReceived: (msg) {
+          final m = msg.message;
+          if (m == 'on' || m == 'off') {
+            setState(() => _pendingMode = m == 'on');
+          } else {
+            _onPendingTapped(m);
+          }
+        },
       )
       ..setNavigationDelegate(
         NavigationDelegate(
@@ -261,6 +274,33 @@ class _OrdersScreenState extends State<OrdersScreen> {
     _showCard(order);
   }
 
+  void _onPendingTapped(String customerIdStr) {
+    final id = int.tryParse(customerIdStr);
+    if (id == null) return;
+    final pendingOrders = _orders.where((o) =>
+        o.customerId == id &&
+        o.status == 'pendiente' &&
+        o.amountPaid < o.total).toList();
+    if (pendingOrders.isEmpty) return;
+    final customerName = pendingOrders.first.customerName;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PendingCustomerOrdersScreen(
+          customerName: customerName,
+          orders: pendingOrders,
+          customers: _customers,
+          catalog: _catalogFor(pendingOrders.first),
+        ),
+      ),
+    );
+  }
+
+  void _togglePendingMode() {
+    setState(() => _pendingMode = !_pendingMode);
+    _controller!.runJavaScript('togglePendingMode()');
+  }
+
   void _showCard(OrderModel order) {
     showModalBottomSheet(
       context: context,
@@ -293,6 +333,14 @@ class _OrdersScreenState extends State<OrdersScreen> {
       appBar: AppBar(
         title: Text(widget.routeName),
         actions: [
+          IconButton(
+            icon: Icon(
+              Icons.pending_actions,
+              color: _pendingMode ? Colors.orange : null,
+            ),
+            tooltip: 'Pendientes',
+            onPressed: _togglePendingMode,
+          ),
           IconButton(
             icon: const Icon(Icons.my_location),
             tooltip: 'Mi ubicación',

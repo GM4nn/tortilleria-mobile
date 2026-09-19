@@ -19,12 +19,12 @@ class OrderItemModel {
 
   factory OrderItemModel.fromMap(Map<String, dynamic> map) {
     return OrderItemModel(
-      productId: (map['product_id'] as num).toInt(),
-      name: map['name'] ?? '',
-      price: (map['price'] as num).toDouble(),
-      quantity: (map['quantity'] as num).toDouble(),
+      productId: (map['product_id'] as num?)?.toInt() ?? 0,
+      name: map['name'] ?? map['product_name'] ?? '',
+      price: (map['price'] ?? map['unit_price'] as num?)?.toDouble() ?? 0,
+      quantity: (map['quantity'] as num?)?.toDouble() ?? 0,
       returned: (map['returned'] as num?)?.toDouble() ?? 0,
-      subtotal: (map['subtotal'] as num).toDouble(),
+      subtotal: (map['subtotal'] as num?)?.toDouble() ?? 0,
       grammage: (map['grammage'] as num?)?.toDouble() ?? 0,
     );
   }

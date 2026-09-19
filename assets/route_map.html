@@ -51,6 +51,7 @@ html,body{height:100%;background:#e5e7eb;color:var(--text);font-family:system-ui
 var map=null, stops=[], color='#2ecc71', markers=[], routeLayer=null, startMk=null;
 var pending=[], pendingMarkers=[]; // clientes de la ruta SIN pedido hoy (grises)
 var start=null; // {lat,lng} GPS del repartidor
+var pendingMode=false; // modo pendientes: solo mostrar órdenes pendientes
 
 function postCh(name, msg){ try{ window[name].postMessage(msg); }catch(e){} }
 
@@ -74,9 +75,20 @@ function setPending(json){
   updateEmpty();
 }
 
+function togglePendingMode(){
+  pendingMode=!pendingMode;
+  postCh('PendingChannel', pendingMode?'on':'off');
+  render();
+  renderPending();
+}
+
 function updateEmpty(){
-  var none = !stops.length && !pending.length;
+  var pendCount = stops.filter(function(s){ return (s.status||'').toLowerCase()==='pendiente'; }).length;
+  var none = pendingMode ? pendCount===0 : (!stops.length && !pending.length);
   document.getElementById('empty').style.display = none? 'flex':'none';
+  document.getElementById('empty').textContent = pendingMode
+    ? 'No hay órdenes pendientes.'
+    : 'Sin clientes con ubicación para hoy.';
 }
 
 // Llamado desde Flutter con la ubicación GPS actual
@@ -123,7 +135,11 @@ function render(){
   var list=document.getElementById('panel-list'); list.innerHTML='';
   var pts=[];
 
-  stops.forEach(function(s,idx){
+  var visibleStops = pendingMode
+    ? stops.filter(function(s){ return (s.status||'').toLowerCase()==='pendiente'; })
+    : stops;
+
+  visibleStops.forEach(function(s,idx){
     // Posición para dibujar (separada si compartía lugar); real para la ruta
     var dlat=s._dlat!=null?s._dlat:s.lat, dlng=s._dlng!=null?s._dlng:s.lng;
     pts.push([dlat,dlng]);
@@ -134,13 +150,26 @@ function render(){
     var icon=L.divIcon({className:'',html:'<div style="width:26px;height:26px;background:'+mColor+';border:2px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:'+textColor+';box-shadow:0 2px 6px rgba(0,0,0,.4)">'+(idx+1)+'</div>',iconSize:[26,26],iconAnchor:[13,13]});
     var mk=L.marker([dlat,dlng],{icon:icon}).addTo(map);
     mk.bindTooltip(s.name||'', {permanent:true, direction:'top', offset:[0,-15], className:'stop-label'});
-    mk.on('click', function(){ postCh('OrderChannel', String(s.order_id)); });
+    mk.on('click', function(){
+      if(pendingMode){
+        postCh('PendingChannel', String(s.customer_id));
+      }else{
+        postCh('OrderChannel', String(s.order_id));
+      }
+    });
     markers.push({marker:mk,stop:s});
 
     var row=document.createElement('div');
     row.className='stop';
     row.innerHTML='<div class="num" style="background:'+mColor+';color:'+textColor+'">'+(idx+1)+'</div><div class="st-info"><div class="st-name">'+s.name+'</div><div class="st-sub">'+(s.items||'')+'</div></div>';
-    row.onclick=function(){ focusStop(s); postCh('OrderChannel', String(s.order_id)); };
+    row.onclick=function(){
+      focusStop(s);
+      if(pendingMode){
+        postCh('PendingChannel', String(s.customer_id));
+      }else{
+        postCh('OrderChannel', String(s.order_id));
+      }
+    };
     list.appendChild(row);
   });
 
@@ -148,8 +177,10 @@ function render(){
 }
 
 // Marcadores grises para clientes sin pedido hoy (tocar = generar su pedido)
+// En modo pendientes se ocultan (solo se muestran los pines rojos de pedidos existentes)
 function renderPending(){
   pendingMarkers.forEach(function(m){ map.removeLayer(m); }); pendingMarkers=[];
+  if(pendingMode) return; // en modo pendientes no se muestran grises
   pending.forEach(function(s){
     var icon=L.divIcon({className:'',html:'<div style="width:24px;height:24px;background:#9ca3af;border:2px dashed #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.35);opacity:.9">+</div>',iconSize:[24,24],iconAnchor:[12,12]});
     var mk=L.marker([s.lat,s.lng],{icon:icon,zIndexOffset:-100}).addTo(map);
@@ -163,8 +194,13 @@ function renderPending(){
 // Ajusta el mapa a todo lo visible: paradas + clientes grises + GPS
 function fitAll(){
   var pts=[];
-  stops.forEach(function(s){ pts.push([s._dlat!=null?s._dlat:s.lat, s._dlng!=null?s._dlng:s.lng]); });
-  pending.forEach(function(s){ pts.push([s.lat,s.lng]); });
+  var visibleStops = pendingMode
+    ? stops.filter(function(s){ return (s.status||'').toLowerCase()==='pendiente'; })
+    : stops;
+  visibleStops.forEach(function(s){ pts.push([s._dlat!=null?s._dlat:s.lat, s._dlng!=null?s._dlng:s.lng]); });
+  if(!pendingMode){
+    pending.forEach(function(s){ pts.push([s.lat,s.lng]); });
+  }
   if(start) pts.push([start.lat,start.lng]);
   if(pts.length) map.fitBounds(L.latLngBounds(pts),{padding:[60,60]});
 }
