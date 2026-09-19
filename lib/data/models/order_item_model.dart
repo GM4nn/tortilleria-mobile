@@ -5,6 +5,7 @@ class OrderItemModel {
   final double quantity; // kilos entregados
   final double returned; // kilos devueltos
   final double subtotal; // bruto = quantity * price
+  final double grammage; // gramos por paquete (0 = no especificado)
 
   const OrderItemModel({
     required this.productId,
@@ -13,6 +14,7 @@ class OrderItemModel {
     required this.quantity,
     this.returned = 0,
     required this.subtotal,
+    this.grammage = 0,
   });
 
   factory OrderItemModel.fromMap(Map<String, dynamic> map) {
@@ -23,15 +25,24 @@ class OrderItemModel {
       quantity: (map['quantity'] as num).toDouble(),
       returned: (map['returned'] as num?)?.toDouble() ?? 0,
       subtotal: (map['subtotal'] as num).toDouble(),
+      grammage: (map['grammage'] as num?)?.toDouble() ?? 0,
     );
   }
 
   /// Neto a cobrar de esta línea: (entregado − devuelto) × precio.
   double get net => (quantity - returned) * price;
 
+  /// Número de paquetes equivalente (solo si hay gramaje configurado).
+  double get packages => grammage > 0 ? quantity * 1000 / grammage : 0;
+
+  /// Texto de conversión: "X paquetes de Yg" (solo si hay gramaje).
+  String get grammageText =>
+      grammage > 0 ? '(${packages.toStringAsFixed(0)} paquetes de ${grammage.toStringAsFixed(0)}g)' : '';
+
   /// Copia con nuevos kilos entregados/devueltos (recalcula el subtotal bruto).
-  OrderItemModel copyWith({double? quantity, double? returned}) {
+  OrderItemModel copyWith({double? quantity, double? returned, double? grammage}) {
     final q = quantity ?? this.quantity;
+    final g = grammage ?? this.grammage;
     return OrderItemModel(
       productId: productId,
       name: name,
@@ -39,6 +50,7 @@ class OrderItemModel {
       quantity: q,
       returned: returned ?? this.returned,
       subtotal: q * price,
+      grammage: g,
     );
   }
 
@@ -49,5 +61,6 @@ class OrderItemModel {
         'quantity': quantity,
         'returned': returned,
         'subtotal': subtotal,
+        'grammage': grammage,
       };
 }

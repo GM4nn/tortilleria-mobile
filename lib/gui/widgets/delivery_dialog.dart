@@ -7,38 +7,47 @@ import '../../data/models/order_model.dart';
 class DeliveryResult {
   final List<OrderItemModel> items;
   final double total;
-  final double amountPaid; // total pagado tras este cierre (existente + lo de ahora)
-  final bool complete; // true = completar; false = solo guardar info (pendiente)
+  final double amountPaid;
+  final bool complete;
   const DeliveryResult(this.items, this.total, this.amountPaid,
       {this.complete = true});
 }
 
-/// Una línea editable del cierre (producto + kilos entregados/devueltos).
 class _Line {
   final int productId;
   final String name;
   final double price;
-  final TextEditingController delivered;
-  final TextEditingController returned;
+  final TextEditingController deliveredCtrl;
+  final TextEditingController returnedCtrl;
+  final TextEditingController paquetesCtrl;
+  final TextEditingController gramajeCtrl;
+  final TextEditingController kgCalcCtrl;
+  bool byGramaje;
+
   _Line({
     required this.productId,
     required this.name,
     required this.price,
-    required this.delivered,
-    required this.returned,
+    required this.deliveredCtrl,
+    required this.returnedCtrl,
+    required this.paquetesCtrl,
+    required this.gramajeCtrl,
+    required this.kgCalcCtrl,
+    this.byGramaje = false,
   });
+
   void dispose() {
-    delivered.dispose();
-    returned.dispose();
+    deliveredCtrl.dispose();
+    returnedCtrl.dispose();
+    paquetesCtrl.dispose();
+    gramajeCtrl.dispose();
+    kgCalcCtrl.dispose();
   }
 }
 
-/// Diálogo para cerrar la entrega: el repartidor ajusta los kilos ENTREGADOS
-/// y los DEVUELTOS por producto; puede AGREGAR productos del catálogo del cliente;
-/// el total se cobra neto: (entregado−devuelto)×precio.
 class DeliveryDialog extends StatefulWidget {
   final OrderModel order;
-  final List<CatalogProduct> catalog; // productos disponibles (por endpoint)
+  final List<CatalogProduct> catalog;
   const DeliveryDialog({
     super.key,
     required this.order,
@@ -63,8 +72,8 @@ class DeliveryDialog extends StatefulWidget {
 class _DeliveryDialogState extends State<DeliveryDialog> {
   final List<_Line> _lines = [];
   late final TextEditingController _payCtrl;
-  bool _payTouched = false; // true si el repartidor editó el pago a mano
-  bool _showAdd = false; // muestra la lista para agregar producto (inline)
+  bool _payTouched = false;
+  bool _showAdd = false;
 
   static final _c = NumberFormat.currency(locale: 'es_MX', symbol: '\$');
 
@@ -76,14 +85,20 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
         productId: i.productId,
         name: i.name,
         price: i.price,
-        delivered: TextEditingController(text: _fmt(i.quantity)),
-        returned:
+        deliveredCtrl: TextEditingController(text: _fmt(i.quantity)),
+        returnedCtrl:
             TextEditingController(text: i.returned > 0 ? _fmt(i.returned) : ''),
+        paquetesCtrl: TextEditingController(
+            text: i.grammage > 0 ? _fmt(i.quantity * 1000 / i.grammage) : '1'),
+        gramajeCtrl: TextEditingController(
+            text: i.grammage > 0 ? i.grammage.toStringAsFixed(0) : ''),
+        kgCalcCtrl: TextEditingController(text: _fmt(i.quantity)),
+        byGramaje: i.grammage > 0,
       ));
     }
     final paid = widget.order.amountPaid;
     _payCtrl = TextEditingController(text: _fmt(paid > 0 ? paid : _total));
-    _payTouched = paid > 0; // no auto-sobrescribas un pago ya existente
+    _payTouched = paid > 0;
   }
 
   @override
@@ -100,13 +115,43 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
   double _num(TextEditingController c) =>
       double.tryParse(c.text.trim().replaceAll(',', '.')) ?? 0;
 
-  double _lineNet(_Line l) => (_num(l.delivered) - _num(l.returned)) * l.price;
+  double _lineNet(_Line l) =>
+      (_num(l.deliveredCtrl) - _num(l.returnedCtrl)) * l.price;
 
-  // Fórmula literal en vivo: (entregado − devuelto) × precio = neto
   String _formula(_Line l) {
-    final del = _num(l.delivered), ret = _num(l.returned);
+    final del = _num(l.byGramaje ? l.kgCalcCtrl : l.deliveredCtrl);
+    final ret = _num(l.returnedCtrl);
     return '(${_fmt(del)} − ${_fmt(ret)} = ${_fmt(del - ret)}) × '
         '${_c.format(l.price)} = ${_c.format((del - ret) * l.price)}';
+  }
+
+  void _recalcKg(_Line l) {
+    final g = _num(l.gramajeCtrl);
+    final p = _num(l.paquetesCtrl);
+    if (l.byGramaje && g > 0 && p > 0) {
+      final kg = p * g / 1000;
+      l.kgCalcCtrl.text = _fmt(kg);
+      l.deliveredCtrl.text = _fmt(kg);
+      if (!_payTouched) {
+        final r = _total - widget.order.amountPaid;
+        _payCtrl.text = _fmt(r < 0 ? 0 : r);
+      }
+    }
+  }
+
+  void _toggleGramaje(_Line l) {
+    setState(() {
+      l.byGramaje = !l.byGramaje;
+      if (l.byGramaje) {
+        l.paquetesCtrl.text = _fmt(_num(l.deliveredCtrl));
+        l.gramajeCtrl.text = '';
+        l.kgCalcCtrl.text = _fmt(_num(l.deliveredCtrl));
+      } else {
+        l.deliveredCtrl.text = l.kgCalcCtrl.text;
+      }
+      _recalcKg(l);
+      _onQtyChanged();
+    });
   }
 
   double get _total {
@@ -119,14 +164,12 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
 
   double get _pay => _num(_payCtrl);
 
-  // El campo YA es el total pagado; solo lo topamos entre 0 y el total
   double get _newPaid {
     final n = _pay;
     if (n < 0) return 0;
     return n > _total ? _total : n;
   }
 
-  // Al cambiar kilos/devueltos: si el pago no se tocó a mano, sincronízalo al restante
   void _onQtyChanged() {
     setState(() {
       if (!_payTouched) {
@@ -136,12 +179,7 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
     });
   }
 
-  // Productos disponibles para agregar (catálogo con precio del cliente, por
-  // endpoint) que aún no están en el pedido.
-  List<CatalogProduct> get _addable {
-    final ids = _lines.map((l) => l.productId).toSet();
-    return widget.catalog.where((p) => !ids.contains(p.productId)).toList();
-  }
+  List<CatalogProduct> get _addable => widget.catalog;
 
   void _addLine(CatalogProduct p) {
     setState(() {
@@ -149,16 +187,18 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
         productId: p.productId,
         name: p.name,
         price: p.price,
-        delivered: TextEditingController(text: '1'), // arranca en 1 (editable)
-        returned: TextEditingController(),
+        deliveredCtrl: TextEditingController(text: '1'),
+        returnedCtrl: TextEditingController(),
+        paquetesCtrl: TextEditingController(text: '1'),
+        gramajeCtrl: TextEditingController(),
+        kgCalcCtrl: TextEditingController(text: '1'),
+        byGramaje: false,
       ));
       _showAdd = false;
       _onQtyChanged();
     });
   }
 
-  // "Agregar producto" INLINE: despliega la lista dentro del mismo modal (sin
-  // abrir otra hoja encima). Al tocar un producto se agrega como línea.
   Widget _buildAddProduct() {
     final options = _addable;
     return Column(
@@ -223,14 +263,20 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
   void _submit({required bool complete}) {
     final items = <OrderItemModel>[];
     for (final l in _lines) {
-      final del = _num(l.delivered), ret = _num(l.returned);
+      final ret = _num(l.returnedCtrl);
+      final gramaje = _num(l.gramajeCtrl);
+      final kg = l.byGramaje
+          ? _num(l.kgCalcCtrl)
+          : _num(l.deliveredCtrl);
+      final finalKg = kg > 0 ? kg : (_num(l.deliveredCtrl));
       items.add(OrderItemModel(
         productId: l.productId,
         name: l.name,
         price: l.price,
-        quantity: del,
+        quantity: finalKg,
         returned: ret,
-        subtotal: del * l.price,
+        subtotal: finalKg * l.price,
+        grammage: l.byGramaje ? gramaje : 0,
       ));
     }
     Navigator.pop(
@@ -250,7 +296,6 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Nota de ayuda
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
@@ -259,7 +304,7 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
                   border: Border.all(color: Colors.blue.withAlpha(60)),
                 ),
                 child: const Text(
-                  '💡 Ajusta los kilos ENTREGADOS si cambiaron.\n'
+                  '💡 Pedido por kg o por paquetes.\n'
                   'Si el cliente te DEVUELVE producto, ponlo en "Devuelto".\n'
                   'Se cobra solo lo que se queda: (entregado − devuelto) × precio.',
                   style: TextStyle(fontSize: 12, height: 1.4),
@@ -275,6 +320,11 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                     ),
+                    Switch(
+                      value: l.byGramaje,
+                      onChanged: (_) => _toggleGramaje(l),
+                      activeThumbColor: Colors.orange,
+                    ),
                     IconButton(
                       icon: const Icon(Icons.close, size: 18),
                       tooltip: 'Quitar',
@@ -288,40 +338,84 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
                   ],
                 ),
                 const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _field(l.delivered, 'Entregado (kg)',
-                          onChanged: _onQtyChanged),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _field(l.returned, 'Devuelto (kg)',
-                          onChanged: _onQtyChanged),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withAlpha(20),
-                    borderRadius: BorderRadius.circular(8),
+                if (!l.byGramaje)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _field(l.deliveredCtrl, 'Entregado (kg)',
+                            onChanged: _onQtyChanged),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _field(l.returnedCtrl, 'Devuelto (kg)',
+                            onChanged: _onQtyChanged),
+                      ),
+                    ],
                   ),
-                  child: Text(
-                    _formula(l),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.green[800],
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
+                if (l.byGramaje) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _field(l.paquetesCtrl, 'Paquetes',
+                            onChanged: () {
+                              _recalcKg(l);
+                              _onQtyChanged();
+                            }),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _field(l.gramajeCtrl, 'Gramaje (g)',
+                            onChanged: () {
+                              _recalcKg(l);
+                              _onQtyChanged();
+                            }),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withAlpha(18),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '≈ ${_fmt(_num(l.kgCalcCtrl))} kg',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.orange[800],
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
                     ),
                   ),
-                ),
+                  const SizedBox(height: 6),
+                  _field(l.returnedCtrl, 'Devuelto (kg)',
+                      onChanged: _onQtyChanged),
+                ],
+                if (!l.byGramaje) ...[
+                  const SizedBox(height: 6),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withAlpha(20),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      _formula(l),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.green[800],
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
                 const Divider(height: 18),
               ],
-              // Agregar producto (inline, sin abrir otro modal encima)
               _buildAddProduct(),
               const SizedBox(height: 8),
               Row(
@@ -335,7 +429,6 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
                 ],
               ),
               const Divider(height: 22),
-              // ── Pago (en el mismo modal) ──
               const Text('Pago', style: TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 6),
               Row(
@@ -380,7 +473,6 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
                 style: TextStyle(fontSize: 11, color: Colors.grey[600]),
               ),
               const SizedBox(height: 16),
-              // Botones en fila (se reparten el ancho para que no se apilen)
               Row(
                 children: [
                   Expanded(

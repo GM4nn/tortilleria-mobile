@@ -279,6 +279,10 @@ class _OrderCardState extends State<OrderCard> {
               _row(theme, 'Devueltos', '${_qty(item.returned)} kg',
                   color: item.returned > 0 ? Colors.orange[800] : null),
               _row(theme, 'Total kilos', '${_qty(netKg)} kg'),
+              if (item.grammage > 0) ...[
+                _row(theme, 'Gramaje/paq', '${item.grammage.toStringAsFixed(0)}g'),
+                _row(theme, 'Paquetes', '${item.packages.toStringAsFixed(0)}'),
+              ],
               const Divider(height: 14),
               _row(theme, 'Total', _currencyFormat.format(net),
                   color: Colors.green[800], bold: true),
