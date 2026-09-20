@@ -88,4 +88,13 @@ class OrderService {
       'notes': notes,
     });
   }
+
+  /// Marca como completadas las órdenes indicadas en Firestore.
+  Future<void> completeAllOrders(List<int> orderIds) async {
+    for (final id in orderIds) {
+      await _collection.doc(id.toString()).update({
+        'status': FirestoreCollections.completedStatus,
+      });
+    }
+  }
 }

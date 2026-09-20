@@ -67,6 +67,10 @@ class ApiService {
   Future<List<Map<String, dynamic>>> getPendingOrders() =>
       _get('/mobile/pending-orders');
 
+  /// Completa y paga todas las órdenes indicadas.
+  Future<Map<String, dynamic>> completeAllOrders(List<int> orderIds) =>
+      _post('/mobile/complete-all', {'order_ids': orderIds});
+
   Future<List<Map<String, dynamic>>> _get(String path) async {
     final res = await http
         .get(
