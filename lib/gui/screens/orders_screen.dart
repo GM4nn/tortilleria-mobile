@@ -308,7 +308,10 @@ class _OrdersScreenState extends State<OrdersScreen> {
       _openCustomerHistory(id);
     } else {
       final customerOrders = _orders.where((o) => o.customerId == id).toList();
-      if (customerOrders.isEmpty) return;
+      if (customerOrders.isEmpty) {
+        _toast('No hay pedido activo para este cliente');
+        return;
+      }
       _showCurrentOrder(customerOrders.first);
     }
   }
