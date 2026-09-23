@@ -120,11 +120,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
         'PendingChannel',
         onMessageReceived: (msg) {
           final m = msg.message;
-          if (m == 'on' || m == 'off') {
-            setState(() => _pendingMode = m == 'on');
-          } else {
-            _onPendingTapped(m);
-          }
+          setState(() => _pendingMode = m == 'on');
         },
       )
       ..setNavigationDelegate(
@@ -217,17 +213,61 @@ class _OrdersScreenState extends State<OrdersScreen> {
     _controller!.runJavaScript('setPending($payload);');
   }
 
-  void _onGenerate(String customerIdStr) {
-    final id = int.tryParse(customerIdStr);
-    if (id == null) return;
-    CustomerModel? customer;
-    for (final c in _customers) {
-      if (c.id == id) {
-        customer = c;
-        break;
-      }
+  void _onGenerate(String jsonData) {
+    try {
+      final data = Map<String, dynamic>.from(
+        // ignore: avoid_dynamic_calls
+        (jsonDecode(jsonData) as Map).map((k, v) => MapEntry(k.toString(), v)),
+      );
+      final id = (data['customer_id'] as num?)?.toInt();
+      final lat = (data['lat'] as num?)?.toDouble();
+      final lng = (data['lng'] as num?)?.toDouble();
+      final name = data['name'] as String? ?? 'este cliente';
+      if (id == null) return;
+      _showGreyCustomerDialog(id, name, lat, lng);
+    } catch (_) {
+      // Fallback: parse as plain customer_id
+      final id = int.tryParse(jsonData);
+      if (id == null) return;
+      final c = _customers.firstWhere((x) => x.id == id, orElse: () => _customers.first);
+      _showGreyCustomerDialog(id, c.name, c.lat, c.lng);
     }
-    _confirmGenerate(id, customer?.name ?? 'este cliente');
+  }
+
+  void _showGreyCustomerDialog(int customerId, String name, double? lat, double? lng) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(name),
+        content: const Text('Este cliente no tiene pedido hoy.'),
+        actions: [
+          if (lat != null && lng != null)
+            TextButton.icon(
+              onPressed: () {
+                Navigator.pop(ctx);
+                final uri = Uri.parse(
+                  'https://www.google.com/maps/dir/?api=1&travelmode=driving'
+                  '&destination=$lat,$lng',
+                );
+                launchUrl(uri, mode: LaunchMode.externalApplication);
+              },
+              icon: const Icon(Icons.directions, size: 18),
+              label: const Text('Cómo llegar'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _confirmGenerate(customerId, name);
+            },
+            child: const Text('Generar pedido'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _confirmGenerate(int customerId, String name) async {
@@ -260,38 +300,71 @@ class _OrdersScreenState extends State<OrdersScreen> {
     }
   }
 
-  void _onPinTapped(String orderIdStr) {
-    final id = int.tryParse(orderIdStr);
-    if (id == null) return;
-    OrderModel? order;
-    for (final o in _orders) {
-      if (o.orderId == id) {
-        order = o;
-        break;
-      }
-    }
-    if (order == null) return;
-    _showCard(order);
-  }
-
-  void _onPendingTapped(String customerIdStr) {
+  void _onPinTapped(String customerIdStr) {
     final id = int.tryParse(customerIdStr);
     if (id == null) return;
-    final pendingOrders = _orders.where((o) =>
-        o.customerId == id &&
-        o.status == 'pendiente' &&
-        o.amountPaid < o.total).toList();
-    if (pendingOrders.isEmpty) return;
-    final customerName = pendingOrders.first.customerName;
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => PendingCustomerOrdersScreen(
-          customerName: customerName,
-          orders: pendingOrders,
-          customers: _customers,
-          catalog: _catalogFor(pendingOrders.first),
+
+    if (_pendingMode) {
+      _openCustomerHistory(id);
+    } else {
+      final customerOrders = _orders.where((o) => o.customerId == id).toList();
+      if (customerOrders.isEmpty) return;
+      _showCurrentOrder(customerOrders.first);
+    }
+  }
+
+  Future<void> _openCustomerHistory(int customerId) async {
+    final customers = _customers.where((c) => c.id == customerId).toList();
+    final customerName = customers.isNotEmpty ? customers.first.name : 'Cliente';
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final allOrders = await _orderService.fetchOrdersByCustomer(customerId);
+      if (!mounted) return;
+      Navigator.pop(context); // quitar loading
+
+      if (allOrders.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se encontraron pedidos para este cliente')),
+        );
+        return;
+      }
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CustomerOrdersScreen(
+            customerName: customerName,
+            orders: allOrders,
+            customers: _customers,
+            catalog: _catalogFor(allOrders.first),
+          ),
         ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error al cargar pedidos del cliente')),
+      );
+    }
+  }
+
+  void _showCurrentOrder(OrderModel order) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _CurrentOrderSheet(
+        order: order,
+        currentDealer: Session.instance.username,
+        customers: _customers,
+        catalog: _catalogFor(order),
       ),
     );
   }
@@ -299,32 +372,6 @@ class _OrdersScreenState extends State<OrdersScreen> {
   void _togglePendingMode() {
     setState(() => _pendingMode = !_pendingMode);
     _controller!.runJavaScript('togglePendingMode()');
-  }
-
-  void _showCard(OrderModel order) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (sheetCtx) => SingleChildScrollView(
-        // Respeta la barra de gestos/área segura para que la card no quede pegada
-        padding: EdgeInsets.fromLTRB(
-          12,
-          0,
-          12,
-          24 + MediaQuery.of(sheetCtx).viewPadding.bottom,
-        ),
-        child: OrderCard(
-          order: order,
-          currentDealer: Session.instance.username,
-          onComplete: () => _completeOrder(order, sheetCtx),
-          onPayment: () => _registerPayment(order, sheetCtx),
-          onTake: () => _takeOrder(order, sheetCtx),
-          onNotes: () => _editNotes(order, sheetCtx),
-          onNavigate: () => _navigateTo(order),
-        ),
-      ),
-    );
   }
 
   @override
@@ -359,86 +406,6 @@ class _OrdersScreenState extends State<OrdersScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Future<void> _takeOrder(OrderModel order, BuildContext sheetCtx) async {
-    final username = Session.instance.username;
-    if (username == null) return;
-
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Tomar Pedido'),
-        content: Text('¿Tomar el pedido de ${order.customerName} y asignártelo?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('No'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Sí, tomar'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true) return;
-    await _orderService.takeOrder(order.orderId, username);
-    if (sheetCtx.mounted) Navigator.pop(sheetCtx);
-    _toast('Pedido tomado');
-  }
-
-  Future<void> _registerPayment(OrderModel order, BuildContext sheetCtx) async {
-    final amount = await PaymentDialog.show(context, order);
-    if (amount == null) return;
-
-    final newTotal = order.amountPaid + amount;
-    try {
-      await _apiService.registerPayment(order.orderId, newTotal); // SQLite
-      await _orderService.registerPayment(order.orderId, newTotal); // Firestore
-    } on ApiException catch (e) {
-      _toast(e.message);
-      return;
-    } catch (_) {
-      _toast('No se pudo registrar el pago. Revisa tu conexión.');
-      return;
-    }
-    if (sheetCtx.mounted) Navigator.pop(sheetCtx);
-    _toast('Pago registrado');
-  }
-
-  // Ruta a un solo cliente en Google Maps (coordenada exacta desde tu ubicación)
-  Future<void> _navigateTo(OrderModel order) async {
-    if (!order.hasLocation) {
-      _toast('Este cliente no tiene ubicación');
-      return;
-    }
-    final uri = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1&travelmode=driving'
-      '&destination=${order.customerLat},${order.customerLng}',
-    );
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
-
-  Future<void> _editNotes(OrderModel order, BuildContext sheetCtx) async {
-    final notes = await NotesDialog.show(context, order);
-    if (notes == null) return; // canceló
-
-    try {
-      await _apiService.updateNotes(order.orderId, notes); // SQLite
-      await _orderService.updateNotes(order.orderId, notes); // Firestore
-    } on ApiException catch (e) {
-      _toast(e.message);
-      return;
-    } catch (_) {
-      _toast('No se pudo guardar la nota. Revisa tu conexión.');
-      return;
-    }
-    if (sheetCtx.mounted) Navigator.pop(sheetCtx);
-    _toast('Nota guardada');
-  }
-
-  // Catálogo para "Agregar producto": productos globales con el precio del
-  // cliente (mapa 'prices' del cliente); si no tiene, precio base.
   List<CatalogProduct> _catalogFor(OrderModel order) {
     CustomerModel? c;
     for (final x in _customers) {
@@ -457,33 +424,259 @@ class _OrdersScreenState extends State<OrdersScreen> {
             ))
         .toList();
   }
+}
 
-  Future<void> _completeOrder(OrderModel order, BuildContext sheetCtx) async {
-    // Cierre de entrega: ajustar kilos entregados/devueltos y cobrar el neto
-    final result =
-        await DeliveryDialog.show(context, order, catalog: _catalogFor(order));
+/// Bottom sheet que muestra la OrderCard del pedido actual con sus acciones
+/// (completar, pagar, tomar, notas).
+class _CurrentOrderSheet extends StatefulWidget {
+  final OrderModel order;
+  final String? currentDealer;
+  final List<CustomerModel> customers;
+  final List<CatalogProduct> catalog;
+
+  const _CurrentOrderSheet({
+    required this.order,
+    required this.currentDealer,
+    required this.customers,
+    required this.catalog,
+  });
+
+  @override
+  State<_CurrentOrderSheet> createState() => _CurrentOrderSheetState();
+}
+
+class _CurrentOrderSheetState extends State<_CurrentOrderSheet> {
+  late OrderModel _order;
+  final _apiService = ApiService();
+  final _orderService = OrderService();
+
+  @override
+  void initState() {
+    super.initState();
+    _order = widget.order;
+  }
+
+  OrderModel get _current => _order;
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.9,
+      minChildSize: 0.4,
+      maxChildSize: 0.95,
+      builder: (ctx, scrollController) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: ListView(
+          controller: scrollController,
+          padding: const EdgeInsets.all(12),
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            OrderCard(
+              order: _current,
+              currentDealer: widget.currentDealer,
+              onComplete: () => _completeOrder(),
+              onPayment: () => _registerPayment(),
+              onTake: () => _takeOrder(),
+              onNotes: () => _editNotes(),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  List<CatalogProduct> get _catalog {
+    CustomerModel? c;
+    for (final x in widget.customers) {
+      if (x.id == _current.customerId) {
+        c = x;
+        break;
+      }
+    }
+    final prices = c?.prices ?? const {};
+    return widget.catalog
+        .map((p) => CatalogProduct(
+              productId: p.productId,
+              name: p.name,
+              icon: p.icon,
+              price: prices[p.productId] ?? p.price,
+            ))
+        .toList();
+  }
+
+  Future<void> _takeOrder() async {
+    final username = Session.instance.username;
+    if (username == null) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Tomar Pedido'),
+        content: Text('¿Tomar el pedido de ${_current.customerName} y asignártelo?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('No')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Sí, tomar')),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+    await _orderService.takeOrder(_current.orderId, username);
+    setState(() {
+      _order = OrderModel(
+        orderId: _order.orderId,
+        customerName: _order.customerName,
+        customerId: _order.customerId,
+        items: _order.items,
+        total: _order.total,
+        amountPaid: _order.amountPaid,
+        status: _order.status,
+        createdAt: _order.createdAt,
+        notes: _order.notes,
+        defaultDealer: username,
+        customerLat: _order.customerLat,
+        customerLng: _order.customerLng,
+        customerDirection: _order.customerDirection,
+        routeId: _order.routeId,
+        routeName: _order.routeName,
+        routeColor: _order.routeColor,
+        routeDealers: _order.routeDealers,
+        deliveryTime: _order.deliveryTime,
+        shopLat: _order.shopLat,
+        shopLng: _order.shopLng,
+      );
+    });
+    _toast('Pedido tomado');
+  }
+
+  Future<void> _registerPayment() async {
+    final amount = await PaymentDialog.show(context, _current);
+    if (amount == null) return;
+
+    final newTotal = _current.amountPaid + amount;
+    try {
+      await _apiService.registerPayment(_current.orderId, newTotal);
+      await _orderService.registerPayment(_current.orderId, newTotal);
+    } on ApiException catch (e) {
+      _toast(e.message);
+      return;
+    } catch (_) {
+      _toast('No se pudo registrar el pago. Revisa tu conexión.');
+      return;
+    }
+    setState(() {
+      _order = OrderModel(
+        orderId: _order.orderId,
+        customerName: _order.customerName,
+        customerId: _order.customerId,
+        items: _order.items,
+        total: _order.total,
+        amountPaid: newTotal,
+        status: _order.status,
+        createdAt: _order.createdAt,
+        notes: _order.notes,
+        defaultDealer: _order.defaultDealer,
+        customerLat: _order.customerLat,
+        customerLng: _order.customerLng,
+        customerDirection: _order.customerDirection,
+        routeId: _order.routeId,
+        routeName: _order.routeName,
+        routeColor: _order.routeColor,
+        routeDealers: _order.routeDealers,
+        deliveryTime: _order.deliveryTime,
+        shopLat: _order.shopLat,
+        shopLng: _order.shopLng,
+      );
+    });
+    _toast('Pago registrado');
+  }
+
+  Future<void> _editNotes() async {
+    final notes = await NotesDialog.show(context, _current);
+    if (notes == null) return;
+
+    try {
+      await _apiService.updateNotes(_current.orderId, notes);
+      await _orderService.updateNotes(_current.orderId, notes);
+    } on ApiException catch (e) {
+      _toast(e.message);
+      return;
+    } catch (_) {
+      _toast('No se pudo guardar la nota. Revisa tu conexión.');
+      return;
+    }
+    setState(() {
+      _order = OrderModel(
+        orderId: _order.orderId,
+        customerName: _order.customerName,
+        customerId: _order.customerId,
+        items: _order.items,
+        total: _order.total,
+        amountPaid: _order.amountPaid,
+        status: _order.status,
+        createdAt: _order.createdAt,
+        notes: notes,
+        defaultDealer: _order.defaultDealer,
+        customerLat: _order.customerLat,
+        customerLng: _order.customerLng,
+        customerDirection: _order.customerDirection,
+        routeId: _order.routeId,
+        routeName: _order.routeName,
+        routeColor: _order.routeColor,
+        routeDealers: _order.routeDealers,
+        deliveryTime: _order.deliveryTime,
+        shopLat: _order.shopLat,
+        shopLng: _order.shopLng,
+      );
+    });
+    _toast('Nota guardada');
+  }
+
+  Future<void> _completeOrder() async {
+    final result = await DeliveryDialog.show(
+      context,
+      _current,
+      catalog: _catalog,
+    );
     if (result == null) return;
 
     try {
-      // SQLite (fuente de verdad)
       await _apiService.completeDelivery(
-        order.orderId,
+        _current.orderId,
         result.items,
         result.total,
         result.amountPaid,
         complete: result.complete,
       );
-      // Firestore (mapa en tiempo real)
       if (result.complete) {
         await _orderService.completeWithDelivery(
-          order.orderId,
+          _current.orderId,
           result.items,
           result.total,
           result.amountPaid,
         );
       } else {
         await _orderService.saveDelivery(
-          order.orderId,
+          _current.orderId,
           result.items,
           result.total,
           result.amountPaid,
@@ -496,7 +689,9 @@ class _OrdersScreenState extends State<OrdersScreen> {
       _toast('No se pudo guardar. Revisa tu conexión.');
       return;
     }
-    if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+    if (result.complete) {
+      if (mounted) Navigator.pop(context);
+    }
     _toast(result.complete ? 'Entrega y pago guardados' : 'Info guardada');
   }
 }

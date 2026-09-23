@@ -51,6 +51,8 @@ class OrderModel {
 
   double get remainingBalance => total - amountPaid;
   bool get isFullyPaid => amountPaid >= total;
+  double get change => amountPaid - total;
+  bool get hasChange => change > 0.01;
 
   String get paymentStatus {
     if (amountPaid <= 0) return 'Sin Pagar';

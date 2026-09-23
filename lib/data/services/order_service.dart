@@ -97,4 +97,16 @@ class OrderService {
       });
     }
   }
+
+  /// Trae TODOS los pedidos de un cliente desde Firestore (sin filtro de fecha).
+  Future<List<OrderModel>> fetchOrdersByCustomer(int customerId) async {
+    final snapshot = await _collection
+        .where('customer_id', isEqualTo: customerId)
+        .get();
+    final orders = snapshot.docs
+        .map((doc) => OrderModel.fromMap(doc.data()))
+        .toList();
+    orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return orders;
+  }
 }

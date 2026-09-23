@@ -330,29 +330,57 @@ class _OrderCardState extends State<OrderCard> {
   Widget _buildPayment(ThemeData theme) {
     final remaining = order.total - order.amountPaid;
     final done = remaining <= 0.001;
+    final change = order.amountPaid - order.total;
+    final hasChange = change > 0.01;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: (done ? Colors.green : Colors.red).withAlpha(18),
+        color: (hasChange ? Colors.blue : done ? Colors.green : Colors.red).withAlpha(18),
         borderRadius: BorderRadius.circular(10),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
         children: [
-          Text(
-            'Pagado: ${_currencyFormat.format(order.amountPaid)}',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: Colors.green[800],
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Pagado: ${_currencyFormat.format(order.amountPaid)}',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: Colors.green[800],
+                ),
+              ),
+              Text(
+                done ? 'Pagado completo' : 'Restante: ${_currencyFormat.format(remaining < 0 ? 0 : remaining)}',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: done ? Colors.green[800] : Colors.red[700],
+                ),
+              ),
+            ],
           ),
-          Text(
-            done ? 'Pagado completo' : 'Restante: ${_currencyFormat.format(remaining)}',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: done ? Colors.green[800] : Colors.red[700],
+          if (hasChange) ...[
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Cambio:',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: Colors.blue[700],
+                  ),
+                ),
+                Text(
+                  _currencyFormat.format(change),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: Colors.blue[700],
+                  ),
+                ),
+              ],
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -472,7 +500,7 @@ class _OrderCardState extends State<OrderCard> {
   String _formatDate(String isoDate) {
     try {
       final date = DateTime.parse(isoDate);
-      return DateFormat('dd MMM yyyy, HH:mm', 'es_MX').format(date);
+      return DateFormat("EEEE d MMM yyyy, HH:mm", 'es_MX').format(date);
     } catch (_) {
       return isoDate;
     }

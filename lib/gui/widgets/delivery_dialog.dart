@@ -167,7 +167,7 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
   double get _newPaid {
     final n = _pay;
     if (n < 0) return 0;
-    return n > _total ? _total : n;
+    return n;
   }
 
   void _onQtyChanged() {
@@ -456,12 +456,14 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
               Align(
                 alignment: Alignment.centerRight,
                 child: Text(
-                  'Restante: ${_c.format(_total - _newPaid)}',
+                  _newPaid > _total
+                      ? 'Cambio: ${_c.format(_newPaid - _total)}'
+                      : 'Restante: ${_c.format(_total - _newPaid)}',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
-                    color: (_total - _newPaid) <= 0.001
-                        ? Colors.green[700]
+                    color: _newPaid >= _total - 0.001
+                        ? Colors.blue[700]
                         : Colors.red[700],
                   ),
                 ),

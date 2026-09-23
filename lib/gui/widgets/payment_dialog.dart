@@ -44,6 +44,9 @@ class _PaymentDialogState extends State<PaymentDialog> {
   @override
   Widget build(BuildContext context) {
     final order = widget.order;
+    final parsed = double.tryParse(_controller.text);
+    final amount = parsed != null && parsed > 0 ? parsed : 0.0;
+    final change = amount - _remaining;
 
     return AlertDialog(
       title: Text('Registrar pago · ${order.customerName}'),
@@ -58,6 +61,7 @@ class _PaymentDialogState extends State<PaymentDialog> {
             controller: _controller,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             autofocus: true,
+            onChanged: (_) => setState(() {}),
             decoration: InputDecoration(
               labelText: 'Monto a abonar',
               prefixText: '\$ ',
@@ -65,6 +69,36 @@ class _PaymentDialogState extends State<PaymentDialog> {
               border: const OutlineInputBorder(),
             ),
           ),
+          if (change > 0.01) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.blue.withAlpha(20),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Cambio:',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue[700],
+                    ),
+                  ),
+                  Text(
+                    _currency.format(change),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue[700],
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
       actions: [
@@ -117,14 +151,8 @@ class _PaymentDialogState extends State<PaymentDialog> {
       return;
     }
 
-    // El dinero se maneja a 2 decimales: evita que un tercer decimal (ej. 70.501)
-    // se cuele y termine excediendo el total del pedido.
+    // El dinero se maneja a 2 decimales
     final amount = (parsed * 100).round() / 100;
-
-    if (amount > _remaining + 0.001) {
-      setState(() => _error = 'No puede exceder ${_currency.format(_remaining)}');
-      return;
-    }
 
     Navigator.pop(context, amount);
   }

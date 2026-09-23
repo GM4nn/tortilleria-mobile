@@ -12,13 +12,13 @@ import '../widgets/notes_dialog.dart';
 import '../widgets/order_card.dart';
 import '../widgets/payment_dialog.dart';
 
-class PendingCustomerOrdersScreen extends StatefulWidget {
+class CustomerOrdersScreen extends StatefulWidget {
   final String customerName;
   final List<OrderModel> orders;
   final List<CustomerModel> customers;
   final List<CatalogProduct> catalog;
 
-  const PendingCustomerOrdersScreen({
+  const CustomerOrdersScreen({
     super.key,
     required this.customerName,
     required this.orders,
@@ -27,25 +27,24 @@ class PendingCustomerOrdersScreen extends StatefulWidget {
   });
 
   @override
-  State<PendingCustomerOrdersScreen> createState() =>
-      _PendingCustomerOrdersScreenState();
+  State<CustomerOrdersScreen> createState() => _CustomerOrdersScreenState();
 }
 
-class _PendingCustomerOrdersScreenState
-    extends State<PendingCustomerOrdersScreen> {
+class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
   final _apiService = ApiService();
   final _orderService = OrderService();
   late List<OrderModel> _orders;
 
   DateTime? _dateFrom;
   DateTime? _dateTo;
+  String _statusFilter = 'all';
 
   static final _currencyFormat = NumberFormat.currency(
     locale: 'es_MX',
     symbol: '\$',
   );
 
-  static final _dateFormat = DateFormat('dd/MM/yyyy');
+  static final _dateFormat = DateFormat("EEEE d 'de' MMMM", 'es_MX');
 
   @override
   void initState() {
@@ -55,13 +54,24 @@ class _PendingCustomerOrdersScreenState
 
   List<OrderModel> get _filteredOrders {
     return _orders.where((o) {
-      if (_dateFrom == null && _dateTo == null) return true;
-      final created = DateTime.tryParse(o.createdAt);
-      if (created == null) return true;
-      if (_dateFrom != null && created.isBefore(_dateFrom!)) return false;
-      if (_dateTo != null) {
-        final endOfDay = _dateTo!.add(const Duration(days: 1));
-        if (created.isAfter(endOfDay)) return false;
+      // Filtro de fecha
+      if (_dateFrom != null || _dateTo != null) {
+        final created = DateTime.tryParse(o.createdAt);
+        if (created == null) return false;
+        if (_dateFrom != null && created.isBefore(_dateFrom!)) return false;
+        if (_dateTo != null) {
+          final endOfDay = _dateTo!.add(const Duration(days: 1));
+          if (created.isAfter(endOfDay)) return false;
+        }
+      }
+      // Filtro de estado
+      if (_statusFilter != 'all') {
+        if (_statusFilter == 'pendiente' && o.status != 'pendiente') return false;
+        if (_statusFilter == 'completado' && o.status != 'completado') return false;
+        if (_statusFilter == 'cancelado' && o.status != 'cancelado') return false;
+        if (_statusFilter == 'pagado' && !o.isFullyPaid) return false;
+        if (_statusFilter == 'sin_pagar' && o.amountPaid > 0) return false;
+        if (_statusFilter == 'parcial' && (o.amountPaid <= 0 || o.isFullyPaid)) return false;
       }
       return true;
     }).toList();
@@ -71,10 +81,6 @@ class _PendingCustomerOrdersScreenState
   Widget build(BuildContext context) {
     final filtered = _filteredOrders;
     final totalFiltered = filtered.fold<double>(0, (s, o) => s + o.total);
-    final restanteFiltered = filtered.fold<double>(
-      0,
-      (s, o) => s + o.remainingBalance,
-    );
 
     return Scaffold(
       appBar: AppBar(
@@ -84,7 +90,7 @@ class _PendingCustomerOrdersScreenState
           children: [
             Text(widget.customerName),
             Text(
-              '${filtered.length} de ${_orders.length} pendiente${_orders.length == 1 ? '' : 's'}',
+              '${filtered.length} de ${_orders.length} pedido${_orders.length == 1 ? '' : 's'}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
@@ -92,10 +98,10 @@ class _PendingCustomerOrdersScreenState
       ),
       body: Column(
         children: [
-          _buildDateFilter(),
+          _buildFilters(),
           Expanded(
             child: filtered.isEmpty
-                ? const Center(child: Text('No hay órdenes pendientes en ese rango.'))
+                ? const Center(child: Text('No hay pedidos en ese rango.'))
                 : ListView.builder(
                     padding: const EdgeInsets.all(12),
                     itemCount: filtered.length,
@@ -112,81 +118,105 @@ class _PendingCustomerOrdersScreenState
                     },
                   ),
           ),
-          if (filtered.isNotEmpty) _buildBulkBar(filtered, totalFiltered, restanteFiltered),
+          if (filtered.isNotEmpty) _buildBulkBar(filtered, totalFiltered),
         ],
       ),
     );
   }
 
-  Widget _buildDateFilter() {
+  Widget _buildFilters() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.grey.withAlpha(20),
         border: Border(bottom: BorderSide(color: Colors.grey.withAlpha(40))),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.date_range, size: 18, color: Colors.grey),
-          const SizedBox(width: 8),
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: _pickDateFrom,
-              icon: const Icon(Icons.calendar_today, size: 16),
-              label: Text(
-                _dateFrom != null
-                    ? 'Desde: ${_dateFormat.format(_dateFrom!)}'
-                    : 'Desde',
-                style: const TextStyle(fontSize: 13),
+          Row(
+            children: [
+              const Icon(Icons.date_range, size: 18, color: Colors.grey),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _pickDateFrom,
+                  icon: const Icon(Icons.calendar_today, size: 16),
+                  label: Text(
+                    _dateFrom != null
+                        ? 'Desde: ${_dateFormat.format(_dateFrom!)}'
+                        : 'Desde',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
               ),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _pickDateTo,
+                  icon: const Icon(Icons.calendar_today, size: 16),
+                  label: Text(
+                    _dateTo != null
+                        ? 'Hasta: ${_dateFormat.format(_dateTo!)}'
+                        : 'Hasta',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
               ),
-            ),
+              if (_dateFrom != null || _dateTo != null) ...[
+                const SizedBox(width: 4),
+                IconButton(
+                  onPressed: () => setState(() {
+                    _dateFrom = null;
+                    _dateTo = null;
+                  }),
+                  icon: const Icon(Icons.clear, size: 18),
+                  tooltip: 'Limpiar fechas',
+                  style: IconButton.styleFrom(
+                    padding: const EdgeInsets.all(4),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
+            ],
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: _pickDateTo,
-              icon: const Icon(Icons.calendar_today, size: 16),
-              label: Text(
-                _dateTo != null
-                    ? 'Hasta: ${_dateFormat.format(_dateTo!)}'
-                    : 'Hasta',
-                style: const TextStyle(fontSize: 13),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Icon(Icons.filter_list, size: 18, color: Colors.grey),
+              const SizedBox(width: 8),
+              Expanded(
+                child: SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'all', label: Text('Todos')),
+                    ButtonSegment(value: 'pendiente', label: Text('Pendiente')),
+                    ButtonSegment(value: 'completado', label: Text('Completado')),
+                    ButtonSegment(value: 'pagado', label: Text('Pagado')),
+                  ],
+                  selected: {_statusFilter},
+                  onSelectionChanged: (sel) => setState(() => _statusFilter = sel.first),
+                  style: ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
               ),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
+            ],
           ),
-          if (_dateFrom != null || _dateTo != null) ...[
-            const SizedBox(width: 4),
-            IconButton(
-              onPressed: () => setState(() {
-                _dateFrom = null;
-                _dateTo = null;
-              }),
-              icon: const Icon(Icons.clear, size: 18),
-              tooltip: 'Limpiar filtro',
-              style: IconButton.styleFrom(
-                padding: const EdgeInsets.all(4),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-          ],
         ],
       ),
     );
   }
 
-  Widget _buildBulkBar(
-    List<OrderModel> filtered,
-    double totalFiltered,
-    double restanteFiltered,
-  ) {
+  Widget _buildBulkBar(List<OrderModel> filtered, double totalFiltered) {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
       decoration: BoxDecoration(
@@ -211,29 +241,18 @@ class _PendingCustomerOrdersScreenState
                         fontWeight: FontWeight.bold,
                       ),
                 ),
-                Text(
-                  'Restante: ${_currencyFormat.format(restanteFiltered)}',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.red[700],
-                      ),
-                ),
               ],
             ),
             const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                onPressed: () => _showCompleteAllModal(
-                  filtered,
-                  totalFiltered,
-                  restanteFiltered,
-                ),
+                onPressed: () => _showCompleteAllModal(filtered, totalFiltered),
                 icon: const Icon(Icons.check_circle, size: 18),
-                label: const Text('Completar todos'),
+                label: const Text('Completar'),
                 style: FilledButton.styleFrom(
                   backgroundColor: Colors.green,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -266,11 +285,11 @@ class _PendingCustomerOrdersScreenState
     if (picked != null) setState(() => _dateTo = picked);
   }
 
-  void _showCompleteAllModal(
-    List<OrderModel> filtered,
-    double totalFiltered,
-    double restanteFiltered,
-  ) {
+  void _showCompleteAllModal(List<OrderModel> orders, double totalFiltered) {
+    final totalKg = orders.fold<double>(0, (s, o) {
+      return s + o.items.fold<double>(0, (si, i) => si + i.quantity);
+    });
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -279,25 +298,16 @@ class _PendingCustomerOrdersScreenState
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'Se completarán ${filtered.length} pedido${filtered.length == 1 ? '' : 's'}:',
+              'Se completarán ${orders.length} pedido${orders.length == 1 ? '' : 's'}:',
               style: const TextStyle(fontWeight: FontWeight.w500),
             ),
             const SizedBox(height: 16),
-            _modalRow('Total de pedidos', _currencyFormat.format(totalFiltered)),
-            _modalRow(
-              'Ya pagado',
-              _currencyFormat.format(totalFiltered - restanteFiltered),
-              color: Colors.green,
-            ),
-            _modalRow(
-              'Se cobrará',
-              _currencyFormat.format(restanteFiltered),
-              color: Colors.red[700],
-              bold: true,
-            ),
+            _modalRow('Total pedidos', '${orders.length}'),
+            _modalRow('Total kilos', '${totalKg.toStringAsFixed(1)} kg'),
+            _modalRow('Monto total', _currencyFormat.format(totalFiltered)),
             const Divider(height: 24),
             Text(
-              '¿Deseas marcar como completados y cobrar el restante de todos?',
+              '¿Marcar como completados y pagar todos?',
               style: TextStyle(color: Colors.grey[600], fontSize: 13),
             ),
           ],
@@ -310,7 +320,7 @@ class _PendingCustomerOrdersScreenState
           FilledButton(
             onPressed: () {
               Navigator.pop(ctx);
-              _executeCompleteAll(filtered);
+              _executeCompleteAll(orders);
             },
             style: FilledButton.styleFrom(backgroundColor: Colors.green),
             child: const Text('Aceptar'),
@@ -339,8 +349,8 @@ class _PendingCustomerOrdersScreenState
     );
   }
 
-  Future<void> _executeCompleteAll(List<OrderModel> filtered) async {
-    final ids = filtered.map((o) => o.orderId).toList();
+  Future<void> _executeCompleteAll(List<OrderModel> pending) async {
+    final ids = pending.map((o) => o.orderId).toList();
 
     try {
       await _apiService.completeAllOrders(ids);
@@ -354,7 +364,7 @@ class _PendingCustomerOrdersScreenState
     }
 
     setState(() {
-      for (final o in filtered) {
+      for (final o in pending) {
         _orders.removeWhere((x) => x.orderId == o.orderId);
       }
     });
