@@ -162,9 +162,11 @@ function render(){
 // Marcadores grises para clientes sin pedido hoy (tocar = generar su pedido)
 function renderPending(){
   pendingMarkers.forEach(function(m){ map.removeLayer(m); }); pendingMarkers=[];
+  declutter(pending);
   pending.forEach(function(s){
+    var dlat=s._dlat!=null?s._dlat:s.lat, dlng=s._dlng!=null?s._dlng:s.lng;
     var icon=L.divIcon({className:'',html:'<div style="width:24px;height:24px;background:#9ca3af;border:2px dashed #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.35);opacity:.9">+</div>',iconSize:[24,24],iconAnchor:[12,12]});
-    var mk=L.marker([s.lat,s.lng],{icon:icon,zIndexOffset:-100}).addTo(map);
+    var mk=L.marker([dlat,dlng],{icon:icon,zIndexOffset:-100}).addTo(map);
     mk.bindTooltip((s.name||'')+' · sin pedido', {permanent:true, direction:'top', offset:[0,-14], className:'stop-label pending-label'});
     mk.on('click', function(){ postCh('GenerateChannel', JSON.stringify({customer_id: s.customer_id, lat: s.lat, lng: s.lng, name: s.name})); });
     pendingMarkers.push(mk);

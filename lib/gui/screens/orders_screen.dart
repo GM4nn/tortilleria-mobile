@@ -224,11 +224,19 @@ class _OrdersScreenState extends State<OrdersScreen> {
       final lng = (data['lng'] as num?)?.toDouble();
       final name = data['name'] as String? ?? 'este cliente';
       if (id == null) return;
-      _showGreyCustomerDialog(id, name, lat, lng);
+      if (_pendingMode) {
+        _openCustomerHistory(id);
+      } else {
+        _showGreyCustomerDialog(id, name, lat, lng);
+      }
     } catch (_) {
       // Fallback: parse as plain customer_id
       final id = int.tryParse(jsonData);
       if (id == null) return;
+      if (_pendingMode) {
+        _openCustomerHistory(id);
+        return;
+      }
       final c = _customers.firstWhere((x) => x.id == id, orElse: () => _customers.first);
       _showGreyCustomerDialog(id, c.name, c.lat, c.lng);
     }
