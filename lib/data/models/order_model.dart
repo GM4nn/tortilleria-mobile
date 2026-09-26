@@ -125,5 +125,8 @@ class OrderModel {
         'status': status,
         // Verde solo cuando está completado Y totalmente pagado
         'done': isFullyDone,
+        // Para pintar el pin a la mitad cuando falta solo una de las dos cosas
+        'delivered': status == 'completado',
+        'paid': isFullyPaid,
       };
 }

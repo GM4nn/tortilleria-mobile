@@ -32,6 +32,8 @@ html,body{height:100%;background:#e5e7eb;color:var(--text);font-family:system-ui
 .st-sub{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 #toast{position:absolute;top:64px;left:50%;transform:translateX(-50%);z-index:900;background:rgba(17,17,24,.95);border:1px solid rgba(46,204,113,.4);border-radius:20px;padding:9px 16px;font-size:12px;font-weight:700;color:var(--accent);display:none;white-space:nowrap;}
 #empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:#6b7280;font-size:14px;padding:24px;z-index:700;}
+#fitBtn{position:absolute;right:14px;bottom:60px;z-index:750;width:46px;height:46px;border-radius:50%;border:none;background:#111118;box-shadow:0 3px 10px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;}
+#fitBtn:active{transform:scale(.92);}
 </style>
 </head>
 <body>
@@ -46,12 +48,21 @@ html,body{height:100%;background:#e5e7eb;color:var(--text);font-family:system-ui
 </div>
 <div id="toast"></div>
 <div id="empty">Sin clientes con ubicación para hoy.</div>
+<button id="fitBtn" onclick="fitAll(true)" aria-label="Ver todos los clientes">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="15 3 21 3 21 9"></polyline>
+    <polyline points="9 21 3 21 3 15"></polyline>
+    <line x1="21" y1="3" x2="14" y2="10"></line>
+    <line x1="3" y1="21" x2="10" y2="14"></line>
+  </svg>
+</button>
 
 <script>
 var map=null, stops=[], color='#2ecc71', markers=[], routeLayer=null, startMk=null;
 var pending=[], pendingMarkers=[]; // clientes de la ruta SIN pedido hoy (grises)
 var start=null; // {lat,lng} GPS del repartidor
 var pendingMode=false; // modo pendientes: solo mostrar órdenes pendientes
+var userInteracted=false; // true en cuanto el usuario toca/arrastra/hace zoom manual
 
 function postCh(name, msg){ try{ window[name].postMessage(msg); }catch(e){} }
 
@@ -98,6 +109,13 @@ function setStart(lat,lng){
 function initMap(){
   map=L.map('map',{zoomControl:true,attributionControl:false}).setView([20.56,-100.40],13);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(map);
+  // Detecta interaccion REAL del usuario (arrastrar, pellizcar, rueda, botones +/-)
+  // para no pisar su zoom/posicion en los refrescos automaticos de datos.
+  // fitBounds/flyTo programaticos NO disparan estos eventos DOM.
+  var mapEl=document.getElementById('map');
+  ['mousedown','touchstart','wheel'].forEach(function(evt){
+    mapEl.addEventListener(evt, function(){ userInteracted=true; }, {passive:true});
+  });
 }
 
 // Separa visualmente los pines que caen casi en el mismo punto (mismo lugar),
@@ -124,6 +142,17 @@ function declutter(list){
   });
 }
 
+// Color del pin: verde = completado Y pagado; gris = cancelado;
+// mitad verde/mitad rojo = solo entregado O solo pagado (falta lo otro);
+// rojo = pendiente (ni entregado ni pagado).
+function pinVisual(s){
+  var st=(s.status||'').toLowerCase();
+  if(st==='cancelado') return {bg:'#9ca3af', text:'#fff'};
+  if(s.done) return {bg:'#2ecc71', text:'#000'};
+  if(!!s.delivered !== !!s.paid) return {bg:'linear-gradient(90deg,#2ecc71 50%,#e74c3c 50%)', text:'#fff'};
+  return {bg:'#e74c3c', text:'#fff'};
+}
+
 function render(){
   markers.forEach(function(m){ map.removeLayer(m.marker); }); markers=[];
   declutter(stops);
@@ -134,11 +163,8 @@ function render(){
     // Posición para dibujar (separada si compartía lugar); real para la ruta
     var dlat=s._dlat!=null?s._dlat:s.lat, dlng=s._dlng!=null?s._dlng:s.lng;
     pts.push([dlat,dlng]);
-    // Color: verde = completado Y pagado; gris = cancelado; rojo = pendiente/sin pagar
-    var st=(s.status||'').toLowerCase();
-    var mColor = s.done ? '#2ecc71' : (st==='cancelado' ? '#9ca3af' : '#e74c3c');
-    var textColor = s.done ? '#000' : '#fff';
-    var icon=L.divIcon({className:'',html:'<div style="width:26px;height:26px;background:'+mColor+';border:2px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:'+textColor+';box-shadow:0 2px 6px rgba(0,0,0,.4)">'+(idx+1)+'</div>',iconSize:[26,26],iconAnchor:[13,13]});
+    var v=pinVisual(s);
+    var icon=L.divIcon({className:'',html:'<div style="width:26px;height:26px;background:'+v.bg+';border:2px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:'+v.text+';box-shadow:0 2px 6px rgba(0,0,0,.4)">'+(idx+1)+'</div>',iconSize:[26,26],iconAnchor:[13,13]});
     var mk=L.marker([dlat,dlng],{icon:icon}).addTo(map);
     mk.bindTooltip(s.name||'', {permanent:true, direction:'top', offset:[0,-15], className:'stop-label'});
     mk.on('click', function(){
@@ -148,7 +174,7 @@ function render(){
 
     var row=document.createElement('div');
     row.className='stop';
-    row.innerHTML='<div class="num" style="background:'+mColor+';color:'+textColor+'">'+(idx+1)+'</div><div class="st-info"><div class="st-name">'+s.name+'</div><div class="st-sub">'+(s.items||'')+'</div></div>';
+    row.innerHTML='<div class="num" style="background:'+v.bg+';color:'+v.text+'">'+(idx+1)+'</div><div class="st-info"><div class="st-name">'+s.name+'</div><div class="st-sub">'+(s.items||'')+'</div></div>';
     row.onclick=function(){
       focusStop(s);
       postCh('OrderChannel', String(s.customer_id));
@@ -174,12 +200,16 @@ function renderPending(){
   fitAll();
 }
 
-// Ajusta el mapa a todo lo visible: paradas + clientes grises + GPS
-function fitAll(){
+// Ajusta el mapa a todo lo visible: SOLO paradas + clientes grises (sin el GPS
+// propio, que puede estar lejos y desencuadrar la vista de los clientes).
+// Si el usuario ya interactuo con el mapa (zoom/arrastre manual), los refrescos
+// automaticos de datos (setStops/setPending tras completar un pedido, etc.) ya
+// NO le pisan su vista — solo el boton manual (force=true) puede volver a encuadrar.
+function fitAll(force){
+  if(userInteracted && !force) return;
   var pts=[];
   stops.forEach(function(s){ pts.push([s._dlat!=null?s._dlat:s.lat, s._dlng!=null?s._dlng:s.lng]); });
   pending.forEach(function(s){ pts.push([s.lat,s.lng]); });
-  if(start) pts.push([start.lat,start.lng]);
   if(pts.length) map.fitBounds(L.latLngBounds(pts),{padding:[60,60]});
 }
 
