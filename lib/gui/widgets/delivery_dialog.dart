@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../data/models/catalog_product.dart';
 import '../../data/models/order_item_model.dart';
 import '../../data/models/order_model.dart';
@@ -181,21 +182,58 @@ class _DeliveryDialogState extends State<DeliveryDialog> {
 
   List<CatalogProduct> get _addable => widget.catalog;
 
+  Future<double> _getResolvedPrice(int productId) async {
+    double price = 0;
+    // Buscar el producto en el catálogo para obtener el precio base
+    for (final product in widget.catalog) {
+      if (product.productId == productId) {
+        price = product.price;
+        break;
+      }
+    }
+
+    try {
+      final customerId = widget.order.customerId;
+      if (customerId != null) {
+        final customerDoc = await FirebaseFirestore.instance
+            .collection('customers')
+            .doc(customerId.toString())
+            .get();
+
+        if (customerDoc.exists) {
+          final prices = customerDoc.data()?['prices'] as Map<String, dynamic>?;
+          if (prices != null) {
+            final customPrice = prices[productId.toString()];
+            if (customPrice != null) {
+              return (customPrice as num).toDouble();
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error al obtener precio: $e');
+    }
+
+    return price;
+  }
+
   void _addLine(CatalogProduct p) {
-    setState(() {
-      _lines.add(_Line(
-        productId: p.productId,
-        name: p.name,
-        price: p.price,
-        deliveredCtrl: TextEditingController(text: '1'),
-        returnedCtrl: TextEditingController(),
-        paquetesCtrl: TextEditingController(text: '1'),
-        gramajeCtrl: TextEditingController(),
-        kgCalcCtrl: TextEditingController(text: '1'),
-        byGramaje: false,
-      ));
-      _showAdd = false;
-      _onQtyChanged();
+    _getResolvedPrice(p.productId).then((resolvedPrice) {
+      setState(() {
+        _lines.add(_Line(
+          productId: p.productId,
+          name: p.name,
+          price: resolvedPrice,
+          deliveredCtrl: TextEditingController(text: '1'),
+          returnedCtrl: TextEditingController(),
+          paquetesCtrl: TextEditingController(text: '1'),
+          gramajeCtrl: TextEditingController(),
+          kgCalcCtrl: TextEditingController(text: '1'),
+          byGramaje: false,
+        ));
+        _showAdd = false;
+        _onQtyChanged();
+      });
     });
   }
 
